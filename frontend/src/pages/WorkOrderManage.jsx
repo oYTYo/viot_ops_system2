@@ -251,6 +251,24 @@ function MetricCard({ icon: Icon, label, value, tone = "normal" }) {
   );
 }
 
+function EllipsisField({ value, className = "" }) {
+  const text = value || "-";
+
+  return (
+    <span className={`block min-w-0 truncate whitespace-nowrap ${className}`} title={text}>
+      {text}
+    </span>
+  );
+}
+
+function WorkOrderTag({ children, className }) {
+  return (
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[var(--layout-tree-action-padding)] text-ui-small leading-none ${className}`}>
+      {children}
+    </span>
+  );
+}
+
 function WorkOrderCard({ order, active, onView, onAdvance, onEdit, onDelete }) {
   const Icon = entityIcon(order.related_entity_type || order.order_type);
   const action = nextStatus(order);
@@ -262,33 +280,27 @@ function WorkOrderCard({ order, active, onView, onAdvance, onEdit, onDelete }) {
       }`}
     >
       <button type="button" onClick={() => onView(order)} className="flex min-w-0 flex-1 flex-col p-[var(--layout-content-padding)] text-left">
-        <div className="flex items-start justify-between gap-[var(--layout-content-gap)]">
-          <div className="flex min-w-0 items-start gap-[var(--layout-search-gap)]">
-            <span className="flex h-[calc(var(--icon-topbar)*1.8)] w-[calc(var(--icon-topbar)*1.8)] shrink-0 items-center justify-center rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-accent)]">
-              <Icon size="var(--icon-topbar)" />
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-ui-large font-bold text-[var(--color-text-main)]" title={order.title}>
-                {order.title}
-              </div>
-              <div className="mt-[var(--layout-tree-gap)] flex flex-wrap items-center gap-[var(--layout-search-gap)]">
-                <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[var(--layout-tree-action-padding)] text-ui-small ${statusClass(order.status)}`}>
-                  {textOf(statusOptions, order.status)}
-                </span>
-                <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[var(--layout-tree-action-padding)] text-ui-small ${priorityClass(order.priority)}`}>
-                  {textOf(priorityOptions, order.priority)}
-                </span>
-              </div>
-            </div>
+        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)]">
+          <span className="row-span-2 flex h-[calc(var(--icon-topbar)*1.8)] w-[calc(var(--icon-topbar)*1.8)] shrink-0 items-center justify-center rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-accent)]">
+            <Icon size="var(--icon-topbar)" />
+          </span>
+          <EllipsisField value={order.title} className="pr-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]" />
+          <div className="flex shrink-0 flex-nowrap items-center gap-[var(--layout-search-gap)]">
+            <WorkOrderTag className={statusClass(order.status)}>
+              {textOf(statusOptions, order.status)}
+            </WorkOrderTag>
+            <WorkOrderTag className={priorityClass(order.priority)}>
+              {textOf(priorityOptions, order.priority)}
+            </WorkOrderTag>
           </div>
-          <span className="shrink-0 text-ui-small font-semibold text-[var(--color-text-muted)]">{order.id}</span>
+          <EllipsisField value={`工单号：${order.id}`} className="col-span-2 col-start-2 max-w-full text-ui-small font-semibold text-[var(--color-text-muted)]" />
         </div>
 
         <div className="mt-[var(--layout-content-gap)] grid grid-cols-2 gap-x-[var(--layout-content-gap)] gap-y-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)]">
           <span className="truncate">类型：{textOf(typeOptions, order.order_type, order.order_type)}</span>
           <span className="truncate">处理人：{order.assignee || "未分派"}</span>
-          <span className="col-span-2 truncate">对象：{order.related_entity_name || entityLabel(order.related_entity_type)}</span>
-          <span className="col-span-2 truncate">范围：{order.region_path || order.region_name || "未限定"}</span>
+          <EllipsisField value={`对象：${order.related_entity_name || entityLabel(order.related_entity_type)}`} className="col-span-2" />
+          <EllipsisField value={`范围：${order.region_path || order.region_name || "未限定"}`} className="col-span-2" />
         </div>
 
         <p className="mt-[var(--layout-content-gap)] line-clamp-2 text-ui-medium leading-relaxed text-[var(--color-text-main)]">
@@ -303,13 +315,13 @@ function WorkOrderCard({ order, active, onView, onAdvance, onEdit, onDelete }) {
         </div>
       </button>
 
-      <div className="flex items-center justify-between border-t border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
-        <button type="button" onClick={() => onView(order)} className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+      <div className="flex items-center justify-between gap-[var(--layout-search-gap)] border-t border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+        <button type="button" onClick={() => onView(order)} className="flex shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] whitespace-nowrap rounded-[var(--layout-radius-sm)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
           <ClipboardList size="var(--icon-bottom)" /> 详情
         </button>
-        <div className="flex items-center gap-[var(--layout-search-gap)]">
+        <div className="flex min-w-0 items-center justify-end gap-[var(--layout-search-gap)]">
           {action && (
-            <button type="button" onClick={() => onAdvance(order, action.value)} className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+            <button type="button" onClick={() => onAdvance(order, action.value)} className="flex shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] whitespace-nowrap rounded-[var(--layout-radius-sm)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
               <PlayCircle size="var(--icon-bottom)" /> {action.label}
             </button>
           )}

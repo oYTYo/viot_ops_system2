@@ -218,6 +218,44 @@ body,
   --color-error-text: #fb7185;
 }
 
+.diagnosis-terminal {
+  background: #ffffff;
+  color: var(--color-accent);
+  white-space: pre-wrap;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.theme-dark .diagnosis-terminal {
+  background: #000000;
+  color: var(--color-accent);
+}
+
+.diagnosis-marquee {
+  display: inline-flex;
+  min-width: max-content;
+  animation: diagnosis-marquee 9s linear infinite;
+}
+
+.diagnosis-marquee:hover {
+  animation-play-state: paused;
+}
+
+.diagnosis-marquee-item {
+  flex: 0 0 auto;
+  padding-right: var(--layout-content-gap);
+  white-space: nowrap;
+}
+
+@keyframes diagnosis-marquee {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
 .viot-map-region-marker {
   min-width: 7.25rem;
   border: 1px solid var(--color-panel-border);

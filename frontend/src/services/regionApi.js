@@ -35,7 +35,7 @@ export async function searchRegionTree(keyword) {
   return res.data;
 }
 
-export async function getNavTreeChildren(parentCode, statusFilter = "all") {
+export async function getNavTreeChildren(parentCode, statusFilter = "all", options = {}) {
   const params = {
     status_filter: statusFilter,
   };
@@ -46,18 +46,22 @@ export async function getNavTreeChildren(parentCode, statusFilter = "all") {
 
   const res = await request.get("/nav-tree/children", {
     params,
+    signal: options.signal,
   });
 
   return res.data;
 }
 
 export async function getNavTreeCameras(regionCode, params = {}) {
+  const { signal, ...queryParams } = params;
+
   const res = await request.get("/nav-tree/cameras", {
     params: {
       region_code: regionCode,
-      status_filter: params.status_filter || "all",
-      ...params,
+      status_filter: queryParams.status_filter || "all",
+      ...queryParams,
     },
+    signal,
   });
 
   return res.data;
@@ -75,12 +79,13 @@ export async function searchNavTree(keyword, statusFilter = "all") {
 }
 
 
-export async function getNavTreeNode(regionCode, statusFilter = "all") {
+export async function getNavTreeNode(regionCode, statusFilter = "all", options = {}) {
   const res = await request.get("/nav-tree/node", {
     params: {
       region_code: regionCode,
       status_filter: statusFilter,
     },
+    signal: options.signal,
   });
 
   return res.data;

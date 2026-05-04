@@ -6,6 +6,7 @@ import {
   getMapRegionCameras,
   getMapRegionChildren,
 } from "../services/mapApi";
+import { getCameraPreview } from "../services/videoApi";
 
 const AMAP_URL = "https://webapi.amap.com/maps?v=2.0";
 const CHINA_CENTER = [104.195397, 35.86166];
@@ -101,7 +102,81 @@ function getCameraMarkerContent(camera, focused = false) {
   `;
 }
 
-export default function MapView({ focusTarget, darkMode }) {
+function MapCameraPreview({ camera, onClose }) {
+  const [state, setState] = useState("connecting");
+  const [preview, setPreview] = useState(null);
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setState("connecting");
+    setPreview(null);
+
+    if (camera.status === "offline") {
+      const timer = window.setTimeout(() => {
+        if (!cancelled) setState("failed");
+      }, 3000);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
+
+    getCameraPreview(getCameraId(camera))
+      .then((data) => {
+        if (cancelled) return;
+        setPreview(data);
+        setState("playing");
+      })
+      .catch(() => {
+        if (!cancelled) setState("failed");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [camera]);
+
+  useEffect(() => {
+    if (!preview?.play_url || state !== "playing") return undefined;
+    const video = videoRef.current;
+    if (!video) return undefined;
+    const play = () => {
+      video.currentTime = Number(preview.start_time || 0);
+      video.play().catch(() => {});
+    };
+    video.addEventListener("loadedmetadata", play, { once: true });
+    video.load();
+    return () => video.removeEventListener("loadedmetadata", play);
+  }, [preview, state]);
+
+  return (
+    <div className="absolute right-[var(--layout-content-padding)] top-[var(--layout-content-padding)] z-20 w-[min(32rem,38vw)] overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black shadow-[var(--shadow-panel)]">
+      <div className="flex items-center justify-between bg-black/80 px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-white">
+        <span className="truncate">{camera.name || camera.camera_name || getCameraId(camera)}</span>
+        <button type="button" onClick={onClose} className="text-white/70 hover:text-white">×</button>
+      </div>
+      <div className="relative aspect-video">
+        {state === "playing" && preview?.play_url ? (
+          <video ref={videoRef} src={preview.play_url} muted loop playsInline className="h-full w-full object-cover" />
+        ) : state === "failed" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-white">
+            <AlertCircle size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
+            无法连接到摄像机
+          </div>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-white">
+            <Loader2 size="var(--icon-topbar)" className="animate-spin text-[var(--color-accent)]" />
+            正在连接摄像机
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const amapRef = useRef(null);
@@ -110,6 +185,7 @@ export default function MapView({ focusTarget, darkMode }) {
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [previewCamera, setPreviewCamera] = useState(null);
   const amapKey = import.meta.env.VITE_AMAP_KEY || import.meta.env.AMAP_KEY || "";
   const mapStyle = darkMode ? MAP_STYLE.dark : MAP_STYLE.light;
 
@@ -180,6 +256,18 @@ export default function MapView({ focusTarget, darkMode }) {
         offset: new AMap.Pixel(-20, -20),
         title: camera.name,
         zIndex: focused ? 240 : 120,
+      });
+
+      marker.on("click", () => {
+        setPreviewCamera(camera);
+      });
+
+      marker.on("dblclick", () => {
+        onOpenCameraDetail?.({
+          ...camera,
+          cameraId: getCameraId(camera),
+          cameraName: camera.name,
+        });
       });
 
       addOverlay(marker);
@@ -366,6 +454,7 @@ export default function MapView({ focusTarget, darkMode }) {
     <main className="relative flex min-w-0 flex-1 bg-[var(--color-page-bg)] p-[var(--layout-content-padding)] transition-colors">
       <section className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
         <div ref={mapContainerRef} className="h-full w-full" />
+        {previewCamera && <MapCameraPreview camera={previewCamera} onClose={() => setPreviewCamera(null)} />}
 
         <div className="pointer-events-none absolute left-[var(--layout-content-padding)] top-[var(--layout-content-padding)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
           <MapPinned size="var(--icon-bottom)" className="text-[var(--color-accent)]" />

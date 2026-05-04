@@ -10,7 +10,7 @@ function formatDateTime(value) {
   ].join(" ");
 }
 
-function VideoTile({ stream, selected, onSelect, onClose, nowText }) {
+function VideoTile({ stream, selected, onSelect, onClose, onOpenDetail, nowText }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -58,6 +58,12 @@ function VideoTile({ stream, selected, onSelect, onClose, nowText }) {
                 正在连接 {stream.cameraName}
               </span>
             </div>
+          ) : stream.status === "failed" ? (
+            <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-[var(--layout-content-gap)] bg-black text-white">
+              <AlertCircle size="var(--icon-logo)" className="text-[var(--color-error-text)]" />
+              <span className="max-w-[80%] truncate text-ui-medium text-white/90">无法连接到摄像机</span>
+              <span className="max-w-[80%] truncate text-ui-small text-white/55">{stream.cameraName}</span>
+            </div>
           ) : (
             <>
               <video
@@ -88,6 +94,16 @@ function VideoTile({ stream, selected, onSelect, onClose, nowText }) {
           >
             <X size="var(--icon-bottom)" />
           </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetail?.(stream);
+            }}
+            className="absolute bottom-[var(--layout-search-padding-y)] right-[var(--layout-search-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:underline"
+          >
+            详情
+          </button>
         </>
       ) : (
         <div className="flex h-full min-h-[12rem] items-center justify-center bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
@@ -105,6 +121,7 @@ export default function VideoBrowse({
   connectionError,
   onSelectSlot,
   onCloseSlot,
+  onOpenCameraDetail,
   onClearConnectionError,
 }) {
   const now = useNow();
@@ -127,6 +144,7 @@ export default function VideoBrowse({
             selected={selectedSlot === index}
             onSelect={() => onSelectSlot(index)}
             onClose={() => onCloseSlot(index)}
+            onOpenDetail={onOpenCameraDetail}
             nowText={nowText}
           />
         ))}

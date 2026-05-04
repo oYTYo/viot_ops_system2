@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   RefreshCw,
@@ -41,7 +41,7 @@ import {
 
 const FAVORITES_STORAGE_KEY = "viot-favorite-region-nodes-v2";
 
-const COUNTRY_NODE_ID = "country-100000-中国";
+const COUNTRY_NODE_ID = "country-100000-cn";
 
 const tabs = [
   { key: "video", label: "视频浏览", icon: Video },
@@ -51,9 +51,48 @@ const tabs = [
   { key: "stats", label: "统计数据", icon: BarChart3 },
 ];
 
+function looksLikeMojibake(value) {
+  return /[\u0080-\u009fÃÂâæåçèéä¤¥]/.test(value);
+}
+
+function repairText(value) {
+  if (typeof value !== "string" || !value || !looksLikeMojibake(value)) return value;
+
+  const candidates = [value];
+  try {
+    const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0));
+    candidates.push(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    // 正常文本或不可逆文本保持原样。
+  }
+
+  const score = (text) => {
+    const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+    const controls = (text.match(/[\u0080-\u009f]/g) || []).length;
+    const markers = (text.match(/[ÃÂâæåçèéä�]/g) || []).length;
+    return cjk * 5 - controls * 10 - markers * 3;
+  };
+
+  return candidates.sort((left, right) => score(right) - score(left))[0];
+}
+
+function repairStoredNode(node) {
+  if (!node || typeof node !== "object") return node;
+  return {
+    ...node,
+    name: repairText(node.name),
+    regionName: repairText(node.regionName),
+    raw: node.raw ? { ...node.raw, region_name: repairText(node.raw.region_name) } : node.raw,
+    children: Array.isArray(node.children) ? node.children.map(repairStoredNode) : node.children,
+  };
+}
+
 function readFavoriteNodes() {
   try {
-    return JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || "{}");
+    const stored = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || "{}");
+    return Object.fromEntries(
+      Object.entries(stored).map(([key, value]) => [key, repairStoredNode(value)])
+    );
   } catch {
     return {};
   }
@@ -73,6 +112,7 @@ function buildNode(item) {
   const nodeType = item.node_type || "region";
   const isCamera = nodeType === "camera";
   const isTown = item.level === "town";
+  const displayName = repairText(item.region_name || item.name || "未命名节点");
 
   const children = (item.children || []).map(buildNode);
 
@@ -83,7 +123,7 @@ function buildNode(item) {
     regionCode: item.region_code || "",
     adcode: item.amap_adcode || item.official_code || "",
     citycode: item.amap_citycode || "",
-    name: item.region_name || item.name || "未命名节点",
+    name: displayName,
     level: item.level || (isCamera ? "camera" : "unknown"),
     center: item.center || "",
     longitude: item.longitude,
@@ -98,22 +138,23 @@ function buildNode(item) {
   };
 }
 
-async function fetchRootRegions(statusFilter = "all") {
-  const provinces = await getNavTreeChildren(null, statusFilter);
+async function fetchRootRegions(statusFilter = "all", options = {}) {
+  const provinces = await getNavTreeChildren(null, statusFilter, options);
   return provinces.map(buildNode);
 }
 
-async function fetchRegionChildren(node, statusFilter = "all") {
+async function fetchRegionChildren(node, statusFilter = "all", options = {}) {
   if (node.nodeType === "camera") return [];
 
   if (node.level === "town") {
     const cameras = await getNavTreeCameras(node.regionCode, {
       status_filter: statusFilter,
+      signal: options.signal,
     });
     return cameras.map(buildNode);
   }
 
-  const children = await getNavTreeChildren(node.regionCode, statusFilter);
+  const children = await getNavTreeChildren(node.regionCode, statusFilter, options);
   return children.map(buildNode);
 }
 
@@ -209,17 +250,17 @@ function toFavoriteNode(node) {
     online: Number(node.online || 0),
     total: Number(node.total || 0),
 
-    // 收藏节点不要保存完整 children，避免 localStorage 过大或结构污染。
+    // 运行时按需加载 children，并保持 localStorage 中的展开状态。
     children: [],
     loaded: isCamera,
     isLeaf: isCamera || node.isLeaf,
 
-    // raw 只保留必要字段，避免把后端原始对象和 children 一起塞进缓存。
+    // raw 字段供功能页透传行政区和摄像机上下文，避免把展示树结构耦合到业务页。
     raw: {
       node_type: node.nodeType || "region",
       camera_id: node.cameraId || "",
       region_code: node.regionCode || "",
-      region_name: node.name || "",
+      region_name: displayName || "",
       level: node.level || "",
       status: node.status || "",
       longitude: node.longitude,
@@ -309,7 +350,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
           </button>
           <button
             onClick={onThemeToggle}
-            title={darkMode ? "点击切换浅色模式" : "点击切换深色模式"}
+            title={darkMode ? "切换浅色模式" : "切换深色模式"}
             className="rounded-[var(--layout-radius-lg)] p-[var(--layout-icon-button-padding)] transition-colors hover:bg-[var(--color-topbar-hover-bg)] hover:text-[var(--color-topbar-hover-text)]"
           >
             <Moon size="var(--icon-topbar)" />
@@ -330,7 +371,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
 function getCameraStatusText(status) {
   if (status === "offline") return "离线";
   if (status === "fault") return "异常";
-  return "在线";
+  return "正常";
 }
 
 function getCameraStatusBadgeClass(status) {
@@ -546,6 +587,9 @@ function Sidebar({
   const [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set([COUNTRY_NODE_ID]));
   const expandedNodeIdsRef = useRef(expandedNodeIds);
   const navRefreshSeqRef = useRef(0);
+  const navRefreshAbortRef = useRef(null);
+  const favoriteRefreshSeqRef = useRef(0);
+  const favoriteRefreshAbortRef = useRef(null);
 
   useEffect(() => {
     expandedNodeIdsRef.current = expandedNodeIds;
@@ -567,6 +611,29 @@ function Sidebar({
 
 
 
+  const nextSidebarNavRefreshSeq = () => {
+    navRefreshAbortRef.current?.abort();
+    navRefreshAbortRef.current = new AbortController();
+    navRefreshSeqRef.current += 1;
+    return {
+      seq: navRefreshSeqRef.current,
+      signal: navRefreshAbortRef.current.signal,
+    };
+  };
+
+  const isCanceledRequest = (error) =>
+    error?.code === "ERR_CANCELED" || error?.name === "CanceledError";
+
+  const nextFavoriteRefresh = () => {
+    favoriteRefreshAbortRef.current?.abort();
+    favoriteRefreshAbortRef.current = new AbortController();
+    favoriteRefreshSeqRef.current += 1;
+    return {
+      seq: favoriteRefreshSeqRef.current,
+      signal: favoriteRefreshAbortRef.current.signal,
+    };
+  };
+
   const favoriteIds = useMemo(() => new Set(Object.keys(favoriteNodes)), [favoriteNodes]);
 
   const sidebarRef = useRef(null);
@@ -586,11 +653,14 @@ function Sidebar({
   }, [resetVersion]);
 
   useEffect(() => {
-    refreshRegionTreeKeepExpanded(cameraStatusFilter);
+    const timer = window.setTimeout(() => {
+      refreshRegionTreeKeepExpanded(cameraStatusFilter);
+    }, 180);
 
-    if (mode === "favorite") {
-      refreshFavoriteDisplayNodes(cameraStatusFilter, favoriteNodes);
-    }
+    return () => {
+      window.clearTimeout(timer);
+      navRefreshAbortRef.current?.abort();
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraStatusFilter]);
@@ -632,7 +702,14 @@ function Sidebar({
   useEffect(() => {
     if (mode !== "favorite") return;
 
-    refreshFavoriteDisplayNodes(cameraStatusFilter, favoriteNodes);
+    const timer = window.setTimeout(() => {
+      refreshFavoriteDisplayNodes(cameraStatusFilter, favoriteNodes);
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+      favoriteRefreshAbortRef.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, cameraStatusFilter, favoriteNodes]);
 
@@ -660,7 +737,7 @@ function Sidebar({
 
 
   const loadRoot = async ({ resetExpanded = false } = {}) => {
-    const requestSeq = nextNavRefreshSeq();
+    const request = nextSidebarNavRefreshSeq();
     setLoadingRoot(true);
     setError("");
     setSearchMode(false);
@@ -670,14 +747,17 @@ function Sidebar({
     }
 
     try {
-      const provinces = await fetchRootRegions(cameraStatusFilter);
+      const provinces = await fetchRootRegions(cameraStatusFilter, {
+        signal: request.signal,
+      });
       const countryNode = buildCountryNode(provinces);
-      if (requestSeq !== navRefreshSeqRef.current) return;
+      if (request.seq !== navRefreshSeqRef.current) return;
       setTree([countryNode]);
     } catch (err) {
+      if (isCanceledRequest(err)) return;
       setError(err.message || "行政区加载失败");
     } finally {
-      if (requestSeq === navRefreshSeqRef.current) {
+      if (request.seq === navRefreshSeqRef.current) {
         setLoadingRoot(false);
       }
     }
@@ -685,7 +765,7 @@ function Sidebar({
 
 
 
-  const refreshNodeByExpandedState = async (node, statusFilter, expandedIds) => {
+  const refreshNodeByExpandedState = async (node, statusFilter, expandedIds, options = {}) => {
   if (node.nodeType === "camera") {
     return node;
   }
@@ -704,14 +784,16 @@ function Sidebar({
   let children = [];
 
   if (node.level === "country") {
-    children = await fetchRootRegions(statusFilter);
+    children = node.children?.length
+      ? node.children
+      : await fetchRootRegions(statusFilter, options);
   } else {
-    children = await fetchRegionChildren(node, statusFilter);
+    children = await fetchRegionChildren(node, statusFilter, options);
   }
 
   const refreshedChildren = await Promise.all(
     children.map((child) =>
-      refreshNodeByExpandedState(child, statusFilter, expandedIds)
+      refreshNodeByExpandedState(child, statusFilter, expandedIds, options)
     )
   );
 
@@ -728,28 +810,32 @@ function Sidebar({
 
 
   const refreshRegionTreeKeepExpanded = async (statusFilter) => {
-    const requestSeq = nextNavRefreshSeq();
+    const request = nextSidebarNavRefreshSeq();
     const expandedIds = expandedNodeIdsRef.current;
 
     setLoadingRoot(true);
     setError("");
 
     try {
-      const provinces = await fetchRootRegions(statusFilter);
+      const provinces = await fetchRootRegions(statusFilter, {
+        signal: request.signal,
+      });
       const countryNode = buildCountryNode(provinces);
 
       const refreshedCountryNode = await refreshNodeByExpandedState(
         countryNode,
         statusFilter,
-        expandedIds
+        expandedIds,
+        { signal: request.signal }
       );
 
-      if (requestSeq !== navRefreshSeqRef.current) return;
+      if (request.seq !== navRefreshSeqRef.current) return;
       setTree([refreshedCountryNode]);
     } catch (err) {
+      if (isCanceledRequest(err)) return;
       setError(err.message || "行政区刷新失败");
     } finally {
-      if (requestSeq === navRefreshSeqRef.current) {
+      if (request.seq === navRefreshSeqRef.current) {
         setLoadingRoot(false);
       }
     }
@@ -809,13 +895,13 @@ function Sidebar({
 
 
 
-  const refreshFavoriteNodeDeep = async (node, statusFilter, expandedIds) => {
+  const refreshFavoriteNodeDeep = async (node, statusFilter, expandedIds, options = {}) => {
     if (node.nodeType === "camera") {
       return node;
     }
 
     if (node.level === "country") {
-      const provinces = await fetchRootRegions(statusFilter);
+      const provinces = await fetchRootRegions(statusFilter, options);
 
       const online = provinces.reduce(
         (sum, item) => sum + Number(item.online || 0),
@@ -833,7 +919,7 @@ function Sidebar({
 
       const children = await Promise.all(
         nextChildren.map((child) =>
-          refreshFavoriteNodeDeep(child, statusFilter, expandedIds)
+          refreshFavoriteNodeDeep(child, statusFilter, expandedIds, options)
         )
       );
 
@@ -852,7 +938,7 @@ function Sidebar({
     let refreshedNode = node;
 
     try {
-      const latest = await getNavTreeNode(node.regionCode, statusFilter);
+      const latest = await getNavTreeNode(node.regionCode, statusFilter, options);
       const latestNode = buildNode(latest);
 
       refreshedNode = {
@@ -866,12 +952,12 @@ function Sidebar({
     }
 
     const nextChildren = expandedIds.has(node.id)
-      ? await fetchRegionChildren(refreshedNode, statusFilter)
+      ? await fetchRegionChildren(refreshedNode, statusFilter, options)
       : node.children || [];
 
     const children = await Promise.all(
       nextChildren.map((child) =>
-        refreshFavoriteNodeDeep(child, statusFilter, expandedIds)
+        refreshFavoriteNodeDeep(child, statusFilter, expandedIds, options)
       )
     );
 
@@ -887,6 +973,7 @@ function Sidebar({
   };
 
   const refreshFavoriteDisplayNodes = async (statusFilter, sourceFavoriteNodes) => {
+    const request = nextFavoriteRefresh();
     const sourceNodes = Object.values(sourceFavoriteNodes);
     const expandedIds = expandedNodeIdsRef.current;
 
@@ -897,11 +984,17 @@ function Sidebar({
 
     try {
       const nextNodes = await Promise.all(
-        sourceNodes.map((node) => refreshFavoriteNodeDeep(node, statusFilter, expandedIds))
+        sourceNodes.map((node) =>
+          refreshFavoriteNodeDeep(node, statusFilter, expandedIds, {
+            signal: request.signal,
+          })
+        )
       );
 
+      if (request.seq !== favoriteRefreshSeqRef.current) return;
       setFavoriteDisplayNodes(nextNodes);
     } catch (error) {
+      if (isCanceledRequest(error)) return;
       console.error("Failed to refresh favorite display nodes:", error);
       setFavoriteDisplayNodes(sourceNodes);
     }
@@ -1153,6 +1246,8 @@ function ContentPlaceholder({
   darkMode,
   onSelectVideoSlot,
   onCloseVideoSlot,
+  onOpenCameraDetail,
+  onCloseExternalDeviceDetail,
   onClearVideoConnectionError,
 }) {
   if (activeTab === "video") {
@@ -1164,17 +1259,18 @@ function ContentPlaceholder({
         connectionError={videoConnectionError}
         onSelectSlot={onSelectVideoSlot}
         onCloseSlot={onCloseVideoSlot}
+        onOpenCameraDetail={onOpenCameraDetail}
         onClearConnectionError={onClearVideoConnectionError}
       />
     );
   }
 
   if (activeTab === "map") {
-    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} />;
+    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} />;
   }
 
   if (activeTab === "device") {
-    return <DeviceManage focusTarget={deviceFocusTarget} />;
+    return <DeviceManage focusTarget={deviceFocusTarget} onCloseExternalDetail={onCloseExternalDeviceDetail} />;
   }
 
   if (activeTab === "ticket") {
@@ -1255,11 +1351,6 @@ function getPageBottomHint(activeTab) {
     stats: "统计数据工具栏",
   };
 
-  const nextNavRefreshSeq = () => {
-    navRefreshSeqRef.current += 1;
-    return navRefreshSeqRef.current;
-  };
-
   return map[activeTab] || "页面工具栏";
 }
 
@@ -1298,19 +1389,19 @@ function getPageBottomActions(activeTab, options = {}) {
   }
 
   if (activeTab === "map") {
-    return <span>后续放置地图缩放、图层、定位等工具</span>;
+    return <span>后续可扩展地图缩放、图层切换、定位等工具</span>;
   }
 
   if (activeTab === "device") {
-    return <span>后续放置批量操作、导入导出等工具</span>;
+    return <span>后续可扩展批量操作、导入导出等工具</span>;
   }
 
   if (activeTab === "ticket") {
-    return <span>后续放置工单筛选、派发、关闭等工具</span>;
+    return <span>后续可扩展工单筛选、派发、关闭等工具</span>;
   }
 
   if (activeTab === "statistics") {
-    return <span>后续放置时间范围、导出报表等工具</span>;
+    return <span>后续可扩展时间范围、报表导出等工具</span>;
   }
 
   return null;
@@ -1333,6 +1424,7 @@ export default function VioTMasterLayout() {
   const [mapFocusTarget, setMapFocusTarget] = useState(null);
   const [deviceFocusTarget, setDeviceFocusTarget] = useState(null);
   const [ticketFocusTarget, setTicketFocusTarget] = useState(null);
+  const externalDetailReturnTabRef = useRef("");
   const offlinePreviewTimersRef = useRef({});
 
   const previewingCameraIds = useMemo(
@@ -1392,6 +1484,33 @@ export default function VioTMasterLayout() {
     });
   };
 
+  const openCameraDetailFrom = (sourceTab, cameraLike) => {
+    const cameraId = cameraLike?.cameraId || cameraLike?.camera_id || cameraLike?.id;
+    if (!cameraId) return;
+
+    externalDetailReturnTabRef.current = sourceTab;
+    setDeviceFocusTarget({
+      id: `camera-${cameraId}`,
+      nodeType: "camera",
+      cameraId,
+      name: cameraLike.cameraName || cameraLike.name || cameraId,
+      status: cameraLike.status || "",
+      openDetail: true,
+      returnTab: sourceTab,
+      version: Date.now(),
+    });
+    setActiveTab("device");
+  };
+
+  const handleCloseExternalDeviceDetail = () => {
+    const returnTab = externalDetailReturnTabRef.current;
+    externalDetailReturnTabRef.current = "";
+    setDeviceFocusTarget(null);
+    if (returnTab) {
+      setActiveTab(returnTab);
+    }
+  };
+
   const handleCameraDoubleClick = async (cameraNode) => {
     if (activeTab !== "video") return;
     if (!cameraNode?.cameraId) return;
@@ -1419,13 +1538,17 @@ export default function VioTMasterLayout() {
             if (current[targetIndex]?.loadedAt !== loadedAt) return current;
 
             const cleared = [...current];
-            cleared[targetIndex] = null;
+            cleared[targetIndex] = {
+              cameraId: cameraNode.cameraId,
+              cameraName,
+              status: "failed",
+              loadedAt,
+            };
             return cleared;
           });
 
           delete offlinePreviewTimersRef.current[targetIndex];
-          setVideoConnectionError(`${cameraName} 当前处于离线状态，连接失败。`);
-        }, 2000);
+        }, 3000);
 
         return next;
       });
@@ -1513,12 +1636,14 @@ export default function VioTMasterLayout() {
           selectedVideoSlot={selectedVideoSlot}
           onSelectVideoSlot={setSelectedVideoSlot}
           onCloseVideoSlot={handleCloseVideoSlot}
+          onOpenCameraDetail={(camera) => openCameraDetailFrom(activeTab, camera)}
+          onCloseExternalDeviceDetail={handleCloseExternalDeviceDetail}
           videoConnectionError={videoConnectionError}
-          onClearVideoConnectionError={() => setVideoConnectionError("")}
           mapFocusTarget={mapFocusTarget}
           deviceFocusTarget={deviceFocusTarget}
           ticketFocusTarget={ticketFocusTarget}
           darkMode={darkMode}
+          onClearVideoConnectionError={() => setVideoConnectionError("")}
         />
       </div>
 

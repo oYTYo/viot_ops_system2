@@ -617,6 +617,34 @@ class WorkOrderRead(WorkOrderBase):
 
 
 # =========================
+# VideoDiagnosis
+# =========================
+
+class VideoDiagnosisRead(BaseModel):
+    id: str
+    camera_id: str
+    work_order_id: str | None = None
+    camera_name: str | None = None
+    camera_status: str | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    health_score: int | None = None
+    business_status: str | None = None
+    abnormal_type: str | None = None
+    root_cause_type: str | None = None
+    root_cause_node: str | None = None
+    root_cause_metric: str | None = None
+    conclusion: str | None = None
+    suggestion: str | None = None
+    ping_output: str | None = None
+    steps: list[dict[str, Any]] | None = None
+    topology: dict[str, Any] | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# =========================
 # Dashboard
 # =========================
 

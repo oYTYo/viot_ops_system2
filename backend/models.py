@@ -673,3 +673,46 @@ class WorkOrder(Base):
         onupdate=datetime.utcnow,
         nullable=False,
     )
+
+
+class VideoDiagnosis(Base):
+    """Camera video diagnosis result and replayable diagnostic narrative."""
+
+    __tablename__ = "video_diagnosis"
+
+    __table_args__ = (
+        Index("ix_video_diagnosis_camera_id", "camera_id"),
+        Index("ix_video_diagnosis_started_at", "started_at"),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    camera_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("camera.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    camera_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    camera_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    health_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    business_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    abnormal_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    root_cause_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    root_cause_node: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    root_cause_metric: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    conclusion: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    suggestion: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ping_output: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    steps: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    topology: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )

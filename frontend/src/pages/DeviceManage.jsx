@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  Activity,
+  ChevronDown,
+  ChevronRight,
   Edit3,
   Eye,
   Link2,
@@ -10,6 +13,7 @@ import {
   Search,
   Server,
   Trash2,
+  Zap,
   X,
 } from "lucide-react";
 import {
@@ -25,6 +29,7 @@ import {
 } from "../services/deviceApi";
 import { getRegionByCode, getRegions } from "../services/regionApi";
 import { getCameraPreview } from "../services/videoApi";
+import { getLatestVideoDiagnosis, runVideoDiagnosis } from "../services/diagnosisApi";
 
 const cameraInitialForm = {
   id: "",
@@ -325,11 +330,11 @@ function useRollingValues(initialValues, { min = 0, max = 100, step = 8, active 
   return values;
 }
 
-function InfoLine({ label, value, mono = false }) {
+function InfoLine({ label, value, mono = false, wrap = false }) {
   return (
-    <div className="grid grid-cols-[8rem_minmax(0,1fr)] items-center gap-[var(--layout-search-gap)] border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] last:border-b-0">
+    <div className="grid grid-cols-[8rem_minmax(0,1fr)] items-center gap-[var(--layout-search-gap)] border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-ui-medium last:border-b-0">
       <span className="whitespace-nowrap text-[var(--color-text-muted)]">{label}</span>
-      <span className={`min-w-0 whitespace-nowrap text-[var(--color-text-main)] ${mono ? "font-mono" : ""}`}>{formatValue(value)}</span>
+      <span className={`min-w-0 text-[var(--color-text-main)] ${wrap ? "whitespace-normal break-words" : "whitespace-nowrap truncate"} ${mono ? "font-mono" : ""}`}>{formatValue(value)}</span>
     </div>
   );
 }
@@ -374,7 +379,7 @@ function ResourceGauge({ label, value, tone = "accent" }) {
   );
 }
 
-function CameraPreview({ camera }) {
+function CameraPreview({ camera, onDiagnose }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [startTime, setStartTime] = useState(0);
   const [previewError, setPreviewError] = useState("");
@@ -384,6 +389,49 @@ function CameraPreview({ camera }) {
   const [clockText, setClockText] = useState("");
   const videoRef = useRef(null);
   const canPreview = camera.status !== "offline";
+
+  useEffect(() => {
+    videoRef.current?.pause();
+    setPreviewUrl("");
+    setStartTime(0);
+    setPreviewError("");
+    setPreviewLoading(false);
+    setIsPlaying(false);
+    setPendingPlay(false);
+  }, [camera.id, canPreview]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!canPreview) return undefined;
+
+    setPreviewLoading(true);
+    setPreviewError("");
+
+    getCameraPreview(camera.id)
+      .then((data) => {
+        if (cancelled) return;
+
+        setStartTime(Number(data.start_time ?? data.startTime ?? Math.random() * 30));
+        setPreviewUrl(data.play_url || "");
+        setPendingPlay(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+
+        console.error("Failed to load camera preview:", err);
+        setPreviewError(err.response?.data?.detail || err.message || "预览拉取失败");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [camera.id, canPreview]);
 
   useEffect(() => {
     const updateClock = () => {
@@ -457,13 +505,16 @@ function CameraPreview({ camera }) {
     <div className="relative min-h-0 overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black">
       <div className="relative aspect-video min-h-0">
         {previewUrl ? (
-          <video ref={videoRef} key={previewUrl} src={previewUrl} loop muted playsInline className="h-full w-full translate-y-12 object-contain" onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} />
+          <video ref={videoRef} key={`${camera.id}-${previewUrl}`} src={previewUrl} loop muted playsInline preload="auto" className="h-full w-full translate-y-12 object-contain" onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} />
         ) : (
           <div className="flex h-full items-center justify-center text-ui-medium text-white/55">{canPreview ? "" : "离线摄像机不可预览"}</div>
         )}
         <div className="absolute left-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] rounded-[var(--layout-radius-sm)] bg-black/60 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small font-semibold text-white">
           {clockText}
         </div>
+        <button type="button" onClick={() => onDiagnose?.(camera)} className="absolute right-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] rounded-[var(--layout-radius-sm)] bg-black/60 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small font-semibold text-[var(--color-accent)] transition hover:underline">
+          视频诊断
+        </button>
         <button type="button" onClick={togglePreview} disabled={!canPreview || previewLoading} className="absolute left-1/2 top-1/2 grid h-[4.5rem] w-[4.5rem] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white transition hover:bg-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-45">
           {previewLoading ? <Loader2 size="var(--icon-topbar)" className="animate-spin" /> : isPlaying ? "Ⅱ" : "▶"}
         </button>
@@ -477,7 +528,7 @@ function CameraPreview({ camera }) {
   );
 }
 
-function CameraDetailContent({ item }) {
+function CameraDetailContent({ item, onDiagnose }) {
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] gap-[var(--layout-content-gap)]">
       <div className="grid content-start gap-[var(--layout-content-gap)]">
@@ -502,7 +553,7 @@ function CameraDetailContent({ item }) {
         </div>
       </div>
 
-      <CameraPreview camera={item} />
+      <CameraPreview camera={item} onDiagnose={onDiagnose} />
     </div>
   );
 }
@@ -613,7 +664,474 @@ function StreamDetailContent({ item }) {
   );
 }
 
-function DetailView({ detail, onClose }) {
+function formatDateTimeText(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  const pad = (num) => String(num).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function ownerContact(camera) {
+  return camera.contact || camera.phone || camera.manager_phone || camera.mobile || "未配置联系方式";
+}
+
+function buildDisposalSuggestion(camera, diagnosis) {
+  const base = diagnosis?.suggestion || "请先完成视频诊断，再根据诊断结果执行处置。";
+  return base;
+}
+
+function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
+  const topologyNodes = diagnosis?.topology?.nodes || [];
+  const cameraNode = topologyNodes.find((node) => node.type === "camera") || { id: camera?.id || "camera", label: "摄像机", name: camera?.name || "摄像机" };
+  const serverNode = topologyNodes.find((node) => node.type === "server") || { id: camera?.server_id || "server", label: "流媒体服务器", name: camera?.server_id || "流媒体服务器" };
+  const clientNode = topologyNodes.find((node) => node.type === "client") || { id: "client", label: "客户端", name: "视频浏览端" };
+  const nodes = [cameraNode, serverNode, clientNode];
+  const canShowFault = diagnosis && Number(diagnosis.health_score) < 80;
+  const faultNode = canShowFault ? diagnosis?.root_cause_node || diagnosis?.topology?.fault_node || "" : "";
+  const metric = diagnosis?.root_cause_metric || diagnosis?.topology?.fault_metric || "";
+  const faultText = `${faultNode} ${metric}`;
+  const uplinkFault = /上行|接入|网络|链路|丢包|抖动|重传|吞吐/.test(faultText);
+  const downlinkFault = /下行|客户端|浏览端/.test(faultText);
+  const safeProgress = Math.max(0, Math.min(100, progress));
+  const nodeProgress = [8, 50, 92];
+  const linkProgress = (index) => {
+    const start = index === 0 ? 18 : 60;
+    const end = index === 0 ? 42 : 84;
+    return Math.max(0, Math.min(100, ((safeProgress - start) / (end - start)) * 100));
+  };
+
+  return (
+    <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(4rem,0.7fr)_minmax(0,1fr)_minmax(4rem,0.7fr)_minmax(0,1fr)] items-start gap-[var(--layout-search-gap)]">
+        {nodes.map((node, index) => {
+          const isFault = faultNode && (node.name === faultNode || node.id === faultNode);
+          const isActive = safeProgress >= nodeProgress[index];
+          return (
+            <Fragment key={node.id}>
+              <div key={node.id} className="min-w-0 text-center">
+                <div className={`grid min-h-[4.5rem] place-items-center rounded-[var(--layout-radius-md)] border px-[var(--layout-search-padding-x)] transition-colors duration-500 ${isFault ? "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]" : isActive ? "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]" : "border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-text-main)]"}`}>
+                  <div className="text-ui-medium font-bold">{node.label}</div>
+                </div>
+                {node.type === "camera" ? (
+                  <div className="mt-[var(--layout-tree-gap)] overflow-hidden text-ui-small text-[var(--color-text-muted)]" title={node.name}>
+                    <span className="diagnosis-marquee">
+                      <span className="diagnosis-marquee-item">{node.name}</span>
+                      <span className="diagnosis-marquee-item" aria-hidden="true">{node.name}</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-[var(--layout-tree-gap)] truncate text-ui-small text-[var(--color-text-muted)]" title={node.name}>{node.name}</div>
+                )}
+                {isFault && (
+                  <div className="mt-[var(--layout-tree-gap)] w-max max-w-[min(30rem,90vw)] whitespace-normal break-words rounded-[var(--layout-radius-sm)] border border-[var(--color-error-text)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-tree-action-padding)] text-left text-ui-small text-[var(--color-error-text)] shadow-[var(--shadow-panel)]" title={metric}>
+                    {metric}
+                  </div>
+                )}
+              </div>
+              {index < nodes.length - 1 && (
+                <div className="relative mt-[2.1rem] min-w-0">
+                  <div className={`absolute left-0 right-0 top-1/2 h-[0.25rem] -translate-y-1/2 overflow-hidden rounded-full ${(index === 0 && uplinkFault) || (index === 1 && downlinkFault) ? "bg-[var(--color-error-bg)]" : "bg-[var(--color-panel-border)]"}`}>
+                    <div
+                      className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ${(index === 0 && uplinkFault) || (index === 1 && downlinkFault) ? "bg-[var(--color-error-text)]" : "bg-[var(--color-accent)]"}`}
+                      style={{ width: `${linkProgress(index)}%` }}
+                    />
+                  </div>
+                  <div className={`relative mx-auto w-max max-w-full truncate rounded-[var(--layout-radius-sm)] bg-[var(--color-panel-bg)] px-[var(--layout-tree-action-padding)] text-ui-small ${(index === 0 && uplinkFault) || (index === 1 && downlinkFault) ? "text-[var(--color-error-text)]" : "text-[var(--color-text-muted)]"}`}>
+                    {index === 0 ? "上行链路" : "下行链路"}
+                  </div>
+                  {((index === 0 && uplinkFault) || (index === 1 && downlinkFault)) && metric && (
+                    <div className="mt-[var(--layout-content-gap)] w-max max-w-[min(30rem,90vw)] whitespace-normal break-words rounded-[var(--layout-radius-sm)] border border-[var(--color-error-text)] bg-[var(--color-error-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-tree-action-padding)] text-left text-ui-small text-[var(--color-error-text)] shadow-[var(--shadow-panel)]" title={metric}>
+                      {metric}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Fragment>
+          );
+        })}
+      </div>
+      {running && (
+        <div className="mt-[var(--layout-content-gap)]">
+          <div className="h-[0.4rem] overflow-hidden rounded-full bg-[var(--color-panel-border)]">
+            <div className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-500" style={{ width: `${safeProgress}%` }} />
+          </div>
+          <div className="mt-[var(--layout-tree-gap)] text-center text-ui-small text-[var(--color-accent)]">正在加载拓扑链路：{safeProgress}%</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InferenceProgress({ progress = 0 }) {
+  const safeProgress = Math.max(0, Math.min(100, progress));
+  return (
+    <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+      <div className="flex items-center justify-between gap-[var(--layout-content-gap)] text-ui-medium">
+        <span className="font-semibold text-[var(--color-text-main)]">异常检测算法推理</span>
+        <span className="font-mono text-[var(--color-accent)]">{safeProgress}%</span>
+      </div>
+      <div className="relative mt-[var(--layout-search-gap)] h-[0.75rem] overflow-hidden rounded-full bg-[var(--color-panel-border)]">
+        <div className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-500" style={{ width: `${safeProgress}%` }} />
+        {safeProgress > 0 && safeProgress < 100 && (
+          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-white/35" style={{ transform: `translateX(${Math.max(0, safeProgress * 2.3)}%)` }} />
+        )}
+      </div>
+      <div className="mt-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">融合历史时间窗、链路拓扑和上下游指标，生成视频健康度。</div>
+    </div>
+  );
+}
+
+function DiagnosisStep({ step, pingOutput, expanded, onToggle, children }) {
+  const summary = `${step.title}：${step.description}`;
+
+  return (
+    <div className="group rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-h-[var(--layout-segment-button-height)] w-full items-center gap-[var(--layout-search-gap)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-left"
+        title={summary}
+      >
+        <span className={`grid h-[2rem] w-[2rem] shrink-0 place-items-center rounded-full text-ui-small font-bold ${step.status === "failed" ? "bg-[var(--color-error-bg)] text-[var(--color-error-text)]" : "bg-[var(--color-hover-bg)] text-[var(--color-accent)]"}`}>
+          {step.index}
+        </span>
+        <div className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-main)]">
+          <span className="font-bold">{step.title}：</span>
+          <span className="text-[var(--color-text-muted)]">{step.description}</span>
+        </div>
+        {expanded ? <ChevronDown size="var(--icon-bottom)" className="shrink-0 text-[var(--color-icon-muted)]" /> : <ChevronRight size="var(--icon-bottom)" className="shrink-0 text-[var(--color-icon-muted)]" />}
+      </button>
+      {expanded && (
+        <div className="border-t border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)]">
+          {step.index !== 2 && (
+            <div className="truncate text-ui-medium text-[var(--color-text-muted)]" title={step.description}>{step.description}</div>
+          )}
+          {step.index === 2 && pingOutput && (
+            <pre className="diagnosis-terminal mt-[var(--layout-search-gap)] overflow-visible rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small">
+              {pingOutput}
+            </pre>
+          )}
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildPingLines(camera) {
+  const ip = camera.ip || "0.0.0.0";
+  if (camera.status === "offline") {
+    return [
+      `正在 Ping ${ip} 具有 32 字节的数据:`,
+      "请求超时。",
+      "请求超时。",
+      "请求超时。",
+      "请求超时。",
+      "",
+      `${ip} 的 Ping 统计信息:`,
+      "    数据包: 已发送 = 4，已接收 = 0，丢失 = 4 (100% 丢失)，",
+    ];
+  }
+
+  return [
+    `正在 Ping ${ip} 具有 32 字节的数据:`,
+    `来自 ${ip} 的回复: 字节=32 时间=6ms TTL=63`,
+    `来自 ${ip} 的回复: 字节=32 时间=7ms TTL=63`,
+    `来自 ${ip} 的回复: 字节=32 时间=6ms TTL=63`,
+    `来自 ${ip} 的回复: 字节=32 时间=8ms TTL=63`,
+    "",
+    `${ip} 的 Ping 统计信息:`,
+    "    数据包: 已发送 = 4，已接收 = 4，丢失 = 0 (0% 丢失)，",
+    "往返行程的估计时间(以毫秒为单位):",
+    "    最短 = 6ms，最长 = 8ms，平均 = 7ms",
+  ];
+}
+
+function VideoDiagnosisView({ camera, onClose }) {
+  const scrollRef = useRef(null);
+  const stepRefs = useRef({});
+  const [diagnosis, setDiagnosis] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [stage, setStage] = useState(0);
+  const [expandedStep, setExpandedStep] = useState(null);
+  const [pingLineCount, setPingLineCount] = useState(0);
+  const [topologyProgress, setTopologyProgress] = useState(0);
+  const [inferenceProgressValue, setInferenceProgressValue] = useState(0);
+  const [runStartedAt, setRunStartedAt] = useState(null);
+  const [runEndedAt, setRunEndedAt] = useState(null);
+  const marqueeItems = [
+    "读取历史状态时间窗",
+    "分析上下游联动影响",
+    "校验 RTP 抖动与乱序",
+    "比对流媒体转码负荷",
+    "计算视频业务健康评分",
+  ];
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getLatestVideoDiagnosis(camera.id)
+      .then((data) => {
+        if (!cancelled) setDiagnosis(data);
+      })
+      .catch((error) => {
+        console.error("Failed to load diagnosis:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [camera.id]);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    setStage(1);
+    setExpandedStep(1);
+    setTopologyProgress(0);
+    setInferenceProgressValue(0);
+    setPingLineCount(0);
+    const timers = camera.status === "offline"
+      ? [window.setTimeout(() => setStage(2), 2200)]
+      : [
+          window.setTimeout(() => setStage(2), 2200),
+          window.setTimeout(() => setStage(3), 8200),
+          window.setTimeout(() => setStage(4), 10800),
+        ];
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [running, camera.status]);
+
+  useEffect(() => {
+    if (!running || stage !== 2) return undefined;
+    setPingLineCount(1);
+    const total = buildPingLines(camera).length;
+    const timer = window.setInterval(() => {
+      setPingLineCount((value) => Math.min(total, value + 1));
+    }, camera.status === "offline" ? 950 : 650);
+    return () => window.clearInterval(timer);
+  }, [running, stage, camera]);
+
+  useEffect(() => {
+    if (!running || stage !== 3) return undefined;
+    setTopologyProgress(0);
+    const timer = window.setInterval(() => {
+      setTopologyProgress((value) => Math.min(100, value + 14));
+    }, 320);
+    return () => window.clearInterval(timer);
+  }, [running, stage]);
+
+  useEffect(() => {
+    if (!running || stage !== 4) return undefined;
+    setInferenceProgressValue(0);
+    const timer = window.setInterval(() => {
+      setInferenceProgressValue((value) => Math.min(99, value + 7));
+    }, 420);
+    return () => window.clearInterval(timer);
+  }, [running, stage]);
+
+  const handleRun = async () => {
+    const startedAt = new Date();
+    setDiagnosis(null);
+    setRunning(true);
+    setStage(1);
+    setExpandedStep(1);
+    setPingLineCount(0);
+    setTopologyProgress(0);
+    setInferenceProgressValue(0);
+    setRunStartedAt(startedAt);
+    setRunEndedAt(null);
+    try {
+      const started = Date.now();
+      const data = await runVideoDiagnosis(camera.id);
+      const elapsed = Date.now() - started;
+      const minDuration = camera.status === "offline" ? 8600 : 16400;
+      window.setTimeout(() => {
+        setDiagnosis(data);
+        setRunEndedAt(new Date(data.ended_at || Date.now()));
+        setTopologyProgress(100);
+        setInferenceProgressValue(100);
+        setStage(camera.status === "offline" ? 2 : 4);
+        setRunning(false);
+        setExpandedStep(null);
+      }, Math.max(0, minDuration - elapsed));
+    } catch (error) {
+      console.error("Failed to run diagnosis:", error);
+      setRunning(false);
+    }
+  };
+
+  const pingLines = buildPingLines(camera);
+  const pingComplete = running && stage >= 2 && pingLineCount >= pingLines.length;
+
+  const steps = running
+    ? [
+        { index: 1, title: "读取设备 IP", status: "done", description: `设备 IP：${camera.ip}，开始网络 Ping 探测。` },
+        ...(stage >= 2 ? [{
+          index: 2,
+          title: "Ping 连通性检测",
+          status: pingComplete && camera.status === "offline" ? "failed" : "done",
+          description: !pingComplete
+            ? "正在执行 Ping 连通性测试，等待全部回显完成。"
+            : camera.status === "offline"
+              ? "设备 ping 不到，建议重新检查设备 IP 是否正确。"
+              : "Ping 可达，基础网络连通，继续第三步。",
+        }] : []),
+        ...(stage >= 3 && camera.status !== "offline" ? [{ index: 3, title: "获取拓扑信息", status: "done", description: "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。" }] : []),
+        ...(stage >= 4 && camera.status !== "offline" ? [{ index: 4, title: "启动异常检测算法", status: "done", description: marqueeItems[stage % marqueeItems.length] }] : []),
+      ]
+    : (diagnosis?.steps || []).filter((step) => step.index !== 5);
+
+  const score = camera.status === "offline" ? 0 : (diagnosis?.health_score ?? 0);
+  const startTimeText = running ? formatDateTimeText(runStartedAt) : formatDateTimeText(diagnosis?.started_at);
+  const endTimeText = running ? formatDateTimeText(runEndedAt) : formatDateTimeText(diagnosis?.ended_at);
+  const resultTitle = running ? "诊断中" : diagnosis?.business_status || "暂无结果";
+  const resultScore = diagnosis ? `${score}分` : "--";
+  const resultToneClass = camera.status === "offline"
+    ? "text-[var(--color-text-muted)]"
+    : camera.status === "fault" || (diagnosis && score < 80)
+      ? "text-[var(--color-error-text)]"
+      : "text-[var(--color-accent)]";
+  const inferenceProgress = running ? inferenceProgressValue : diagnosis ? 100 : 0;
+  const topologyDisplayProgress = running ? topologyProgress : diagnosis ? 100 : 0;
+  const pingOutput = running ? pingLines.slice(0, pingLineCount).join("\n") : diagnosis?.ping_output;
+
+  useEffect(() => {
+    if (!running) return;
+    setExpandedStep(stage);
+  }, [running, stage]);
+
+  useEffect(() => {
+    if (!expandedStep) return;
+    window.setTimeout(() => {
+      stepRefs.current[expandedStep]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 80);
+  }, [expandedStep]);
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto">
+      <section className="overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
+        <header className="flex min-h-[var(--layout-segment-button-height)] items-center justify-between gap-[var(--layout-content-gap)] border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+          <div className="min-w-0">
+            <div className="truncate text-ui-large font-bold text-[var(--color-text-main)]">{camera.id} - {camera.name} - 视频诊断</div>
+          </div>
+          <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
+            <button type="button" onClick={handleRun} disabled={running} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)] disabled:opacity-60">
+              {running ? <Loader2 size="var(--icon-bottom)" className="animate-spin" /> : <Zap size="var(--icon-bottom)" />}
+              {running ? "诊断中" : "诊断"}
+            </button>
+            <button type="button" title="关闭诊断" onClick={onClose} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-error-text)]">
+              <X size="var(--icon-topbar)" />
+            </button>
+          </div>
+        </header>
+
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[var(--layout-content-gap)] p-[var(--layout-content-padding)]">
+          <aside className="space-y-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+            <div className="flex items-center gap-[var(--layout-search-gap)] text-[var(--color-accent)]">
+              <Camera size="var(--icon-topbar)" />
+              <div className="text-ui-large font-bold text-[var(--color-text-main)]">设备信息</div>
+            </div>
+            <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-hover-bg)] p-[var(--layout-content-gap)]">
+              <div className="grid gap-[var(--layout-tree-gap)] text-ui-medium text-[var(--color-text-main)]">
+                <div>归属单位：{camera.unit || "未配置归属单位"}</div>
+                <div>运维人员：{camera.manager || "未配置负责人"}</div>
+                <div>联系方式：{ownerContact(camera)}</div>
+              </div>
+            </div>
+            <InfoLine label="设备ID" value={camera.id} mono />
+            <InfoLine label="名称" value={camera.name} wrap />
+            <InfoLine label="状态" value={cameraStatusText(camera.status)} />
+            <InfoLine label="IP" value={camera.ip} mono />
+            <InfoLine label="服务器" value={camera.server_id} mono />
+            <InfoLine label="位置" value={[camera.province_name, camera.city_name, camera.county_name, camera.town_name].filter(Boolean).join(" / ")} wrap />
+          </aside>
+
+          <div className="space-y-[var(--layout-content-gap)]">
+            {loading ? (
+              <div className="flex min-h-[20rem] items-center justify-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] text-ui-medium text-[var(--color-text-muted)]">
+                <Loader2 size="var(--icon-search)" className="animate-spin" /> 正在加载历史诊断
+              </div>
+            ) : (
+              <>
+                <section className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-[var(--layout-content-gap)]">
+                  <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+                    <div className="text-ui-medium font-bold text-[var(--color-text-main)]">诊断时间</div>
+                    <div className="mt-[var(--layout-search-gap)] truncate text-ui-medium text-[var(--color-text-muted)]" title={`${startTimeText} → ${endTimeText}`}>
+                      {startTimeText} → {endTimeText}
+                    </div>
+                  </div>
+                  <div className="relative rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+                    <div className="pr-[calc(var(--font-title)*2.4)] text-ui-medium font-bold leading-none text-[var(--color-text-main)]">诊断结果</div>
+                    <div className={`absolute right-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] font-mono text-app-title font-bold leading-none ${resultToneClass}`}>{resultScore}</div>
+                    <div className="mt-[var(--layout-search-gap)] truncate text-ui-medium leading-none text-[var(--color-accent)]" title={resultTitle}>
+                      {resultTitle}
+                    </div>
+                    {diagnosis?.work_order_id && (
+                      <div className="mt-[var(--layout-search-gap)] truncate text-ui-small text-[var(--color-text-muted)]" title={diagnosis.work_order_id}>
+                        已生成工单：{diagnosis.work_order_id}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section ref={scrollRef} className="max-h-[48rem] space-y-[var(--layout-search-gap)] overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-ui-large font-bold text-[var(--color-text-main)]">诊断描述</div>
+                    {running && <div className="text-ui-small text-[var(--color-accent)]">{marqueeItems[stage % marqueeItems.length]}...</div>}
+                  </div>
+                  <div className="space-y-[var(--layout-tree-gap)]">
+                    {steps.map((step) => (
+                      <div key={step.index} ref={(element) => { stepRefs.current[step.index] = element; }}>
+                        <DiagnosisStep
+                          step={step}
+                          pingOutput={pingOutput}
+                          expanded={expandedStep === step.index}
+                          onToggle={() => setExpandedStep((value) => (value === step.index ? null : step.index))}
+                        >
+                          {step.index === 3 && (
+                            <MiniTopology diagnosis={diagnosis} camera={camera} running={running} progress={topologyDisplayProgress} />
+                          )}
+                          {step.index === 4 && (running || diagnosis) && (
+                            <>
+                              <InferenceProgress progress={inferenceProgress} />
+                              {diagnosis && (
+                                <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+                                  <div className="grid grid-cols-3 gap-[var(--layout-content-gap)] text-ui-medium">
+                                    <InfoLine label="异常类型" value={diagnosis.abnormal_type || diagnosis.business_status} />
+                                    <InfoLine label="根因位置" value={diagnosis.root_cause_node || "无"} wrap />
+                                    <InfoLine label="核心指标" value={diagnosis.root_cause_metric} wrap />
+                                  </div>
+                                  <div className="mt-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-main)]">{diagnosis.conclusion}</div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </DiagnosisStep>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+                  <div className="mb-[var(--layout-search-padding-y)] flex items-center gap-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]">
+                    <Activity size="var(--icon-topbar)" className="text-[var(--color-accent)]" />
+                    处置建议
+                  </div>
+                  <div className="text-ui-medium leading-relaxed text-[var(--color-text-main)]">{buildDisposalSuggestion(camera, diagnosis)}</div>
+                </section>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DetailView({ detail, onClose, onDiagnose }) {
   if (!detail?.item) return null;
   const { type, item } = detail;
   const isCamera = type === "camera";
@@ -678,7 +1196,7 @@ function DetailView({ detail, onClose }) {
         </header>
 
         <div className="min-h-0 p-[var(--layout-content-padding)]">
-          {isCamera && <CameraDetailContent item={item} />}
+          {isCamera && <CameraDetailContent item={item} onDiagnose={onDiagnose} />}
           {isServer && <ServerDetailContent item={item} />}
           {isStream && <StreamDetailContent item={item} />}
         </div>
@@ -953,7 +1471,7 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
   );
 }
 
-export default function DeviceManage({ focusTarget }) {
+export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   const [activeTab, setActiveTab] = useState("camera");
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -962,6 +1480,7 @@ export default function DeviceManage({ focusTarget }) {
   const [servers, setServers] = useState([]);
   const [streams, setStreams] = useState([]);
   const [detail, setDetail] = useState(null);
+  const [diagnosisCamera, setDiagnosisCamera] = useState(null);
   const [formState, setFormState] = useState(null);
 
   const regionCode = focusTarget?.nodeType === "region" ? focusTarget.regionCode : "";
@@ -1039,6 +1558,48 @@ export default function DeviceManage({ focusTarget }) {
   useEffect(() => {
     if (cameraId) setActiveTab("camera");
   }, [cameraId]);
+
+  useEffect(() => {
+    if (!cameraId) return;
+    const camera = cameras.find((item) => item.id === cameraId);
+    if (!camera) return;
+
+    setActiveTab("camera");
+
+    if (focusTarget?.openDiagnosis || diagnosisCamera) {
+      setDetail(null);
+      setDiagnosisCamera(camera);
+      return;
+    }
+
+    if (focusTarget?.openDetail || detail?.type === "camera") {
+      setDiagnosisCamera(null);
+      setDetail({
+        type: "camera",
+        item: camera,
+        fromExternal: Boolean(focusTarget?.returnTab),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, cameras, focusTarget?.version, diagnosisCamera]);
+
+  const closeDetail = () => {
+    const shouldReturn = detail?.fromExternal;
+    setDetail(null);
+    if (shouldReturn) {
+      onCloseExternalDetail?.();
+    }
+  };
+
+  const openDiagnosis = (camera) => {
+    setDetail(null);
+    setDiagnosisCamera(camera);
+  };
+
+  const closeDiagnosis = () => {
+    setDiagnosisCamera(null);
+    setDetail(null);
+  };
 
   const onlineCameraCount = focusedCameras.filter((item) => item.status === "online").length;
   const onlineServerCount = focusedServers.filter((item) => item.status === "normal").length;
@@ -1271,6 +1832,7 @@ export default function DeviceManage({ focusTarget }) {
                 type="button"
                 onClick={() => {
                   setDetail(null);
+                  setDiagnosisCamera(null);
                   setActiveTab(key);
                 }}
                 className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
@@ -1306,19 +1868,21 @@ export default function DeviceManage({ focusTarget }) {
           </div>
         )}
 
-        {detail ? (
-          <DetailView detail={detail} onClose={() => setDetail(null)} />
+        {diagnosisCamera ? (
+          <VideoDiagnosisView camera={diagnosisCamera} onClose={closeDiagnosis} />
+        ) : detail ? (
+          <DetailView detail={detail} onClose={closeDetail} onDiagnose={openDiagnosis} />
         ) : loading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-muted)]">
             <Loader2 size="var(--icon-search)" className="animate-spin" />
             正在加载设备数据
           </div>
         ) : activeTab === "camera" ? (
-          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => setDetail({ type: "camera", item })} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} />
+          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} />
         ) : activeTab === "server" ? (
-          <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => setDetail({ type: "server", item })} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} />
+          <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} />
         ) : (
-          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => setDetail({ type: "stream", item })} readonly />
+          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly />
         )}
       </section>
 

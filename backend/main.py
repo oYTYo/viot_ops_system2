@@ -22,7 +22,8 @@ app = FastAPI(title="VIoT Ops Backend API", version="0.1.0")
 
 BASE_DIR = Path(__file__).resolve().parent
 VIDEOS_DIR = BASE_DIR / "videos"
-DEMO_VIDEO_NAME = "traffic_btr500k.mp4"
+NORMAL_VIDEO_NAME = "normal.mp4"
+ANOMALY_VIDEO_NAME = "anomaly.mp4"
 
 app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="videos")
 
@@ -39,6 +40,7 @@ app.add_middleware(
 @app.on_event("startup")
 def create_runtime_tables() -> None:
     models.WorkOrder.__table__.create(bind=engine, checkfirst=True)
+    models.VideoDiagnosis.__table__.create(bind=engine, checkfirst=True)
 
 
 def get_db():
@@ -47,6 +49,41 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _looks_like_mojibake(value: str) -> bool:
+    if not value:
+        return False
+
+    markers = ("Ã", "Â", "â", "æ", "å", "ç", "è", "é", "ä", "¤", "¥")
+    if any(marker in value for marker in markers):
+        return True
+
+    return any(0x80 <= ord(ch) <= 0x9F for ch in value)
+
+
+def _text(value: str | None) -> str | None:
+    """
+    修复数据库中历史导入时出现的 UTF-8 被 Latin1/CP1252 误解码文本。
+    正常中文不处理，只对明显乱码字符串做兜底恢复。
+    """
+    if value is None or not isinstance(value, str) or not _looks_like_mojibake(value):
+        return value
+
+    candidates = [value]
+    for encoding in ("latin1", "cp1252"):
+        try:
+            candidates.append(value.encode(encoding).decode("utf-8"))
+        except UnicodeError:
+            continue
+
+    def score(text: str) -> int:
+        cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        controls = sum(1 for ch in text if 0x80 <= ord(ch) <= 0x9F)
+        bad_markers = sum(text.count(marker) for marker in ("Ã", "Â", "â", "æ", "å", "ç", "è", "é", "ä", "�"))
+        return cjk * 5 - controls * 10 - bad_markers * 3
+
+    return max(candidates, key=score)
 
 
 @app.get("/")
@@ -354,7 +391,7 @@ def _region_to_nav_node(
         "node_type": "region",
         "id": region.region_code,
         "region_code": region.region_code,
-        "region_name": region.region_name,
+        "region_name": _text(region.region_name),
         "level": region.level,
         "parent_code": region.parent_code,
         "official_code": region.official_code,
@@ -364,7 +401,7 @@ def _region_to_nav_node(
         "source": region.source,
         "source_version": region.source_version,
         "sort_order": region.sort_order,
-        "remark": region.remark,
+        "remark": _text(region.remark),
         "online": region_stats["online"],
         "total": region_stats["total"],
         "children": [],
@@ -379,7 +416,7 @@ def _camera_to_nav_node(camera: models.Camera) -> dict[str, Any]:
         "id": camera.id,
         "camera_id": camera.id,
         "region_code": camera.town_code,
-        "region_name": camera.name,
+        "region_name": _text(camera.name),
         "level": "camera",
         "parent_code": camera.town_code,
         "official_code": None,
@@ -394,7 +431,7 @@ def _camera_to_nav_node(camera: models.Camera) -> dict[str, Any]:
         "total": 1,
         "status": camera.status,
         "ip": camera.ip,
-        "name": camera.name,
+        "name": _text(camera.name),
         "longitude": camera.longitude,
         "latitude": camera.latitude,
         "video_url": camera.video_url,
@@ -483,9 +520,13 @@ def get_nav_tree_cameras(
     左侧导航树加载某个行政区下的摄像机。
     主要在乡级行政区展开时调用。
     """
-    region_codes = _collect_region_descendant_codes(db, region_code)
+    region = _get_region_or_404(db, region_code)
 
-    query = db.query(models.Camera).filter(models.Camera.town_code.in_(region_codes))
+    if region.level == "town":
+        query = db.query(models.Camera).filter(models.Camera.town_code == region_code)
+    else:
+        region_codes = _collect_region_descendant_codes(db, region_code)
+        query = db.query(models.Camera).filter(models.Camera.town_code.in_(region_codes))
 
     db_status = _camera_db_status_from_filter(status_filter)
     if db_status:
@@ -662,7 +703,7 @@ def _region_to_tree_node(
 ) -> dict[str, Any]:
     return {
         "region_code": region.region_code,
-        "region_name": region.region_name,
+        "region_name": _text(region.region_name),
         "level": region.level,
         "parent_code": region.parent_code,
         "official_code": region.official_code,
@@ -672,7 +713,7 @@ def _region_to_tree_node(
         "source": region.source,
         "source_version": region.source_version,
         "sort_order": region.sort_order,
-        "remark": region.remark,
+        "remark": _text(region.remark),
         "created_at": region.created_at,
         "updated_at": region.updated_at,
         "children": [],
@@ -1247,15 +1288,18 @@ def get_camera_preview(camera_id: str, db: Session = Depends(get_db)):
     camera = db.get(models.Camera, camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="camera not found")
+    if camera.status == "offline":
+        raise HTTPException(status_code=503, detail="camera offline")
 
-    video_path = VIDEOS_DIR / DEMO_VIDEO_NAME
+    video_name = ANOMALY_VIDEO_NAME if camera.status == "fault" else NORMAL_VIDEO_NAME
+    video_path = VIDEOS_DIR / video_name
     if not video_path.exists():
-        raise HTTPException(status_code=404, detail="demo video not found")
+        raise HTTPException(status_code=404, detail=f"preview video '{video_name}' not found")
 
     return {
         "camera_id": camera.id,
         "camera_name": camera.name,
-        "play_url": f"/videos/{DEMO_VIDEO_NAME}",
+        "play_url": f"/videos/{video_name}",
         "start_time": randint(0, 45),
     }
 
@@ -2088,6 +2132,225 @@ def delete_work_order(order_id: str, db: Session = Depends(get_db)):
     db.delete(obj)
     db.commit()
     return {"message": f"work_order '{order_id}' deleted"}
+
+
+# =========================
+# VideoDiagnosis
+# =========================
+
+def _make_video_diagnosis_id(camera_id: str) -> str:
+    safe_camera_id = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in camera_id)
+    return f"vd-{safe_camera_id}-{datetime.utcnow():%Y%m%d%H%M%S}-{randint(100, 999)}"[:64]
+
+
+def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
+    server_name = camera.server_id or "流媒体服务器"
+
+    if camera.status == "offline":
+        return {
+            "health_score": 0,
+            "business_status": "断连",
+            "abnormal_type": "断连",
+            "root_cause_type": "网络链路异常",
+            "root_cause_node": camera.name,
+            "root_cause_metric": "ICMP 不可达，设备无响应",
+            "conclusion": "摄像机不可达，视频业务中断。",
+            "suggestion": "请运维人员优先核对设备 IP、供电状态、接入交换机端口和现场网线连接。",
+            "ping_output": f"PING {camera.ip}: request timeout\nPING {camera.ip}: destination host unreachable\n--- {camera.ip} ping statistics ---\n4 packets transmitted, 0 received, 100% packet loss",
+            "steps": [
+                {"index": 1, "title": "读取设备 IP", "status": "done", "description": f"设备 IP：{camera.ip}，开始网络 Ping 探测。"},
+                {"index": 2, "title": "Ping 连通性检测", "status": "failed", "description": "设备 ping 不到，基础网络不可达，诊断流程提前结束。"},
+            ],
+        }
+
+    fault_profiles = [
+        ("拖影", "服务器节点异常", server_name, "转码负荷过高，CPU 利用率 > 95%", 75, "画面轻微拖影"),
+        ("卡顿", "网络链路异常", "接入网络链路", "高抖动 42ms，频繁重传，吞吐量下降 38%", 68, "视频明显卡顿"),
+        ("花屏", "网络链路异常", "摄像机上行链路", "乱序率高，关键帧丢失，丢包率 6.8%", 62, "画面局部花屏"),
+        ("断连", "服务器节点异常", server_name, "网卡缓冲区溢出，服务进程短时无响应", 48, "链路间歇断连"),
+    ]
+    abnormal_type, cause_type, cause_node, cause_metric, score, business_status = fault_profiles[
+        sum(ord(ch) for ch in camera.id) % len(fault_profiles)
+    ]
+
+    if camera.status != "fault":
+        abnormal_type, cause_type, cause_node, cause_metric, score, business_status = (
+            "无明显异常",
+            "未发现关键瓶颈",
+            "无",
+            "关键指标处于正常阈值内",
+            92,
+            "视频业务健康",
+        )
+
+    return {
+        "health_score": score,
+        "business_status": business_status,
+        "abnormal_type": abnormal_type,
+        "root_cause_type": cause_type,
+        "root_cause_node": cause_node,
+        "root_cause_metric": cause_metric,
+        "conclusion": f"健康度 {score} 分，{business_status}。",
+        "suggestion": (
+            "当前视频传输状态良好，链路健康。"
+            if score >= 80
+            else (
+                "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。"
+                if cause_type == "服务器节点异常"
+                else "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。"
+            )
+        ),
+        "ping_output": f"PING {camera.ip}: 56 data bytes\n64 bytes from {camera.ip}: icmp_seq=1 ttl=63 time=6.8 ms\n64 bytes from {camera.ip}: icmp_seq=2 ttl=63 time=7.1 ms\n64 bytes from {camera.ip}: icmp_seq=3 ttl=63 time=6.5 ms\n--- {camera.ip} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss",
+        "steps": [
+            {"index": 1, "title": "读取设备 IP", "status": "done", "description": f"设备 IP：{camera.ip}，开始网络 Ping 探测。"},
+            {"index": 2, "title": "Ping 连通性检测", "status": "done", "description": "Ping 可达，基础网络连通，继续采集链路上下游状态。"},
+            {"index": 3, "title": "获取拓扑信息", "status": "done", "description": "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。"},
+            {"index": 4, "title": "启动异常检测算法", "status": "done", "description": f"识别为：{business_status}，根因指向：{cause_node}。"},
+        ],
+    }
+
+
+def _build_diagnosis_topology(camera: models.Camera, profile: dict[str, Any]) -> dict[str, Any]:
+    server_id = camera.server_id or "stream-server"
+    return {
+        "nodes": [
+            {"id": camera.id, "label": "摄像机", "name": camera.name, "type": "camera"},
+            {"id": "network-node", "label": "网络节点", "name": "接入交换机", "type": "network"},
+            {"id": server_id, "label": "流媒体服务器", "name": server_id, "type": "server"},
+            {"id": "client", "label": "客户端", "name": "视频浏览端", "type": "client"},
+        ],
+        "fault_node": profile["root_cause_node"],
+        "fault_metric": profile["root_cause_metric"],
+    }
+
+
+def _find_open_video_diagnosis_order(db: Session, camera_id: str) -> models.WorkOrder | None:
+    return (
+        db.query(models.WorkOrder)
+        .filter(
+            models.WorkOrder.related_entity_type == "camera",
+            models.WorkOrder.related_entity_id == camera_id,
+            models.WorkOrder.source == "video_diagnosis",
+            models.WorkOrder.status.notin_(["closed", "cancelled"]),
+        )
+        .order_by(models.WorkOrder.updated_at.desc())
+        .first()
+    )
+
+
+def _diagnosis_work_order_note(diagnosis: models.VideoDiagnosis) -> str:
+    return (
+        f"诊断时间：{diagnosis.started_at:%Y-%m-%d %H:%M:%S}；"
+        f"健康度：{diagnosis.health_score}分；"
+        f"业务状态：{diagnosis.business_status}；"
+        f"异常类型：{diagnosis.abnormal_type}；"
+        f"根因位置：{diagnosis.root_cause_node}；"
+        f"核心指标：{diagnosis.root_cause_metric}；"
+        f"处置建议：{diagnosis.suggestion}"
+    )[:512]
+
+
+def _sync_video_diagnosis_work_order(
+    db: Session,
+    camera: models.Camera,
+    diagnosis: models.VideoDiagnosis,
+) -> str | None:
+    if camera.status == "online" and (diagnosis.health_score or 0) >= 80:
+        return None
+
+    now = datetime.utcnow()
+    priority = "urgent" if camera.status == "offline" else "high"
+    title = f"{camera.name}{diagnosis.business_status or '视频异常'}"
+    description = _diagnosis_work_order_note(diagnosis)
+
+    order = _find_open_video_diagnosis_order(db, camera.id)
+    if order:
+        order.title = title[:128]
+        order.description = description
+        order.priority = priority
+        order.status = order.status or "pending"
+        order.assignee = camera.manager or order.assignee or "值班运维"
+        order.sla_deadline = now + timedelta(hours=2 if priority == "urgent" else 8)
+        order.last_action = f"视频诊断更新：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分"
+        _append_work_order_timeline(order, "视频诊断更新", "视频诊断", description)
+        return order.id
+
+    data = {
+        "id": _make_work_order_id(),
+        "title": title[:128],
+        "description": description,
+        "order_type": "camera",
+        "priority": priority,
+        "status": "pending",
+        "source": "video_diagnosis",
+        "related_entity_type": "camera",
+        "related_entity_id": camera.id,
+        "related_entity_name": camera.name,
+        "region_code": camera.town_code,
+        "assignee": camera.manager or "值班运维",
+        "creator": "视频诊断",
+        "sla_deadline": now + timedelta(hours=2 if priority == "urgent" else 8),
+        "last_action": f"视频诊断自动生成：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分",
+        "timeline": [],
+    }
+    _hydrate_work_order_context(db, data)
+    order = models.WorkOrder(**data)
+    _append_work_order_timeline(order, "视频诊断自动生成工单", "视频诊断", description)
+    db.add(order)
+    return order.id
+
+
+def _attach_video_diagnosis_work_order_id(
+    db: Session,
+    diagnosis: models.VideoDiagnosis | None,
+) -> models.VideoDiagnosis | None:
+    if not diagnosis:
+        return None
+
+    order = _find_open_video_diagnosis_order(db, diagnosis.camera_id)
+    diagnosis.work_order_id = order.id if order else None
+    return diagnosis
+
+
+@app.get("/cameras/{camera_id}/diagnoses/latest", response_model=schemas.VideoDiagnosisRead | None)
+def get_latest_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
+    _ensure_camera_exists(db, camera_id)
+    diagnosis = (
+        db.query(models.VideoDiagnosis)
+        .filter(models.VideoDiagnosis.camera_id == camera_id)
+        .order_by(models.VideoDiagnosis.started_at.desc())
+        .first()
+    )
+    return _attach_video_diagnosis_work_order_id(db, diagnosis)
+
+
+@app.post("/cameras/{camera_id}/diagnoses/run", response_model=schemas.VideoDiagnosisRead)
+def run_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
+    camera = db.get(models.Camera, camera_id)
+    if not camera:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    started_at = datetime.utcnow()
+    profile = _diagnosis_profile(camera)
+    ended_at = started_at + timedelta(seconds=randint(8, 16))
+
+    obj = models.VideoDiagnosis(
+        id=_make_video_diagnosis_id(camera.id),
+        camera_id=camera.id,
+        camera_name=camera.name,
+        camera_status=camera.status,
+        started_at=started_at,
+        ended_at=ended_at,
+        topology=_build_diagnosis_topology(camera, profile),
+        **profile,
+    )
+    db.add(obj)
+    db.flush()
+    work_order_id = _sync_video_diagnosis_work_order(db, camera, obj)
+    _commit_or_rollback(db, "failed to create video diagnosis: constraint violation")
+    db.refresh(obj)
+    obj.work_order_id = work_order_id
+    return obj
 
 
 # =========================
