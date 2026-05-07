@@ -536,7 +536,7 @@ def seed_cameras_and_streams(
                 vendor=random.choice(vendors),
                 ip=f"10.206.{ip_second}.{ip_last}",
                 status=status,
-                protocol=random.choice(["RTSP", "GB28181", "RTP"]),
+                protocol=random.choice(["RTSP", "GB28181", "RTSP"]),
                 codec=random.choice(codecs),
                 stream_type=random.choice(["main", "main", "sub"]),
                 access_type=random.choice(access_types),

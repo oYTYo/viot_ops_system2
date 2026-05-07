@@ -387,6 +387,9 @@ function CameraPreview({ camera, onDiagnose }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [pendingPlay, setPendingPlay] = useState(false);
   const [clockText, setClockText] = useState("");
+  const [previewBox, setPreviewBox] = useState({ width: 0, height: 0 });
+  const [videoRatio, setVideoRatio] = useState(16 / 9);
+  const previewBoxRef = useRef(null);
   const videoRef = useRef(null);
   const canPreview = camera.status !== "offline";
 
@@ -434,6 +437,29 @@ function CameraPreview({ camera, onDiagnose }) {
   }, [camera.id, canPreview]);
 
   useEffect(() => {
+    const element = previewBoxRef.current;
+    if (!element) return undefined;
+
+    const updatePreviewBox = () => {
+      const rect = element.getBoundingClientRect();
+      setPreviewBox({
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+
+    updatePreviewBox();
+    const observer = new ResizeObserver(updatePreviewBox);
+    observer.observe(element);
+    window.addEventListener("resize", updatePreviewBox);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePreviewBox);
+    };
+  }, []);
+
+  useEffect(() => {
     const updateClock = () => {
       const now = new Date();
       const pad = (value) => String(value).padStart(2, "0");
@@ -449,7 +475,14 @@ function CameraPreview({ camera, onDiagnose }) {
     const video = videoRef.current;
     if (!video) return;
 
+    const syncVideoRatio = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setVideoRatio(video.videoWidth / video.videoHeight);
+      }
+    };
+
     const playFromStart = () => {
+      syncVideoRatio();
       if (Number.isFinite(startTime)) {
         video.currentTime = startTime;
       }
@@ -472,6 +505,29 @@ function CameraPreview({ camera, onDiagnose }) {
       video.removeEventListener("loadedmetadata", playFromStart);
     };
   }, [pendingPlay, previewUrl, startTime]);
+
+  const videoFrameStyle = useMemo(() => {
+    const { width, height } = previewBox;
+
+    if (width <= 0 || height <= 0 || !Number.isFinite(videoRatio) || videoRatio <= 0) {
+      return { inset: 0 };
+    }
+
+    let frameWidth = width;
+    let frameHeight = frameWidth / videoRatio;
+
+    if (frameHeight > height) {
+      frameHeight = height;
+      frameWidth = frameHeight * videoRatio;
+    }
+
+    return {
+      width: `${frameWidth}px`,
+      height: `${frameHeight}px`,
+      left: `${(width - frameWidth) / 2}px`,
+      top: `${(height - frameHeight) / 2}px`,
+    };
+  }, [previewBox, videoRatio]);
 
   const togglePreview = async () => {
     if (!canPreview || previewLoading) return;
@@ -502,10 +558,27 @@ function CameraPreview({ camera, onDiagnose }) {
   };
 
   return (
-    <div className="relative min-h-0 overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black">
-      <div className="relative aspect-video min-h-0">
+    <div ref={previewBoxRef} className="relative h-full min-h-[calc(var(--font-large)*12)] overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black">
+      <div className="absolute overflow-hidden" style={videoFrameStyle}>
         {previewUrl ? (
-          <video ref={videoRef} key={`${camera.id}-${previewUrl}`} src={previewUrl} loop muted playsInline preload="auto" className="h-full w-full translate-y-12 object-contain" onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} />
+          <video
+            ref={videoRef}
+            key={`${camera.id}-${previewUrl}`}
+            src={previewUrl}
+            loop
+            muted
+            playsInline
+            preload="auto"
+            className="h-full w-full object-contain"
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              if (video.videoWidth > 0 && video.videoHeight > 0) {
+                setVideoRatio(video.videoWidth / video.videoHeight);
+              }
+            }}
+            onPause={() => setIsPlaying(false)}
+            onPlay={() => setIsPlaying(true)}
+          />
         ) : (
           <div className="flex h-full items-center justify-center text-ui-medium text-white/55">{canPreview ? "" : "离线摄像机不可预览"}</div>
         )}
@@ -518,12 +591,12 @@ function CameraPreview({ camera, onDiagnose }) {
         <button type="button" onClick={togglePreview} disabled={!canPreview || previewLoading} className="absolute left-1/2 top-1/2 grid h-[4.5rem] w-[4.5rem] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white transition hover:bg-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-45">
           {previewLoading ? <Loader2 size="var(--icon-topbar)" className="animate-spin" /> : isPlaying ? "Ⅱ" : "▶"}
         </button>
-        {previewError && (
-          <div className="absolute inset-x-0 bottom-0 bg-[var(--color-error-bg)] px-[var(--layout-content-gap)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-error-text)]">
-            {previewError}
-          </div>
-        )}
       </div>
+      {previewError && (
+        <div className="absolute inset-x-0 bottom-0 bg-[var(--color-error-bg)] px-[var(--layout-content-gap)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-error-text)]">
+          {previewError}
+        </div>
+      )}
     </div>
   );
 }
@@ -537,7 +610,7 @@ function CameraDetailContent({ item, onDiagnose }) {
             <div className="mb-[var(--layout-search-padding-y)] text-ui-medium font-semibold text-[var(--color-text-main)]">基础信息</div>
             <InfoLine label="IP" value={item.ip} mono />
             <InfoLine label="协议" value={item.protocol} />
-            <InfoLine label="编码" value={item.codec} />
+            <InfoLine label="编码格式" value={item.codec} />
             <InfoLine label="码流" value={item.stream_type} />
             <InfoLine label="厂商" value={item.vendor} />
             <InfoLine label="型号" value={item.model} />
@@ -654,7 +727,7 @@ function StreamDetailContent({ item }) {
         <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] p-[var(--layout-content-gap)]">
           <div className="mb-[var(--layout-search-padding-y)] text-ui-medium font-semibold text-[var(--color-text-main)]">传输参数</div>
           <InfoLine label="链路状态" value={streamStatusText(item)} />
-          <InfoLine label="编码" value={item.codec} />
+          <InfoLine label="编码格式" value={item.codec} />
           <InfoLine label="分辨率" value={item.resolution} />
           <InfoLine label="帧率" value={item.frame_rate} />
           <InfoLine label="QoE" value={item.qoe_score} />
@@ -670,10 +743,6 @@ function formatDateTimeText(value) {
   if (Number.isNaN(date.getTime())) return "-";
   const pad = (num) => String(num).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function ownerContact(camera) {
-  return camera.contact || camera.phone || camera.manager_phone || camera.mobile || "未配置联系方式";
 }
 
 function buildDisposalSuggestion(camera, diagnosis) {
@@ -703,7 +772,7 @@ function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
 
   return (
     <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(4rem,0.7fr)_minmax(0,1fr)_minmax(4rem,0.7fr)_minmax(0,1fr)] items-start gap-[var(--layout-search-gap)]">
+      <div className="grid grid-cols-[minmax(0,0.78fr)_minmax(4rem,0.7fr)_minmax(0,1fr)_minmax(4rem,0.7fr)_minmax(0,0.78fr)] items-start gap-[var(--layout-search-gap)]">
         {nodes.map((node, index) => {
           const isFault = faultNode && (node.name === faultNode || node.id === faultNode);
           const isActive = safeProgress >= nodeProgress[index];
@@ -1028,27 +1097,7 @@ function VideoDiagnosisView({ camera, onClose }) {
           </div>
         </header>
 
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[var(--layout-content-gap)] p-[var(--layout-content-padding)]">
-          <aside className="space-y-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
-            <div className="flex items-center gap-[var(--layout-search-gap)] text-[var(--color-accent)]">
-              <Camera size="var(--icon-topbar)" />
-              <div className="text-ui-large font-bold text-[var(--color-text-main)]">设备信息</div>
-            </div>
-            <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-hover-bg)] p-[var(--layout-content-gap)]">
-              <div className="grid gap-[var(--layout-tree-gap)] text-ui-medium text-[var(--color-text-main)]">
-                <div>归属单位：{camera.unit || "未配置归属单位"}</div>
-                <div>运维人员：{camera.manager || "未配置负责人"}</div>
-                <div>联系方式：{ownerContact(camera)}</div>
-              </div>
-            </div>
-            <InfoLine label="设备ID" value={camera.id} mono />
-            <InfoLine label="名称" value={camera.name} wrap />
-            <InfoLine label="状态" value={cameraStatusText(camera.status)} />
-            <InfoLine label="IP" value={camera.ip} mono />
-            <InfoLine label="服务器" value={camera.server_id} mono />
-            <InfoLine label="位置" value={[camera.province_name, camera.city_name, camera.county_name, camera.town_name].filter(Boolean).join(" / ")} wrap />
-          </aside>
-
+        <div className="min-h-0 p-[var(--layout-content-padding)]">
           <div className="space-y-[var(--layout-content-gap)]">
             {loading ? (
               <div className="flex min-h-[20rem] items-center justify-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] text-ui-medium text-[var(--color-text-muted)]">
@@ -1058,22 +1107,17 @@ function VideoDiagnosisView({ camera, onClose }) {
               <>
                 <section className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)] gap-[var(--layout-content-gap)]">
                   <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
-                    <div className="text-ui-medium font-bold text-[var(--color-text-main)]">诊断时间</div>
+                    <div className="text-ui-large font-bold text-[var(--color-text-main)]">诊断时间</div>
                     <div className="mt-[var(--layout-search-gap)] truncate text-ui-medium text-[var(--color-text-muted)]" title={`${startTimeText} → ${endTimeText}`}>
                       {startTimeText} → {endTimeText}
                     </div>
                   </div>
                   <div className="relative rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
-                    <div className="pr-[calc(var(--font-title)*2.4)] text-ui-medium font-bold leading-none text-[var(--color-text-main)]">诊断结果</div>
-                    <div className={`absolute right-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] font-mono text-app-title font-bold leading-none ${resultToneClass}`}>{resultScore}</div>
-                    <div className="mt-[var(--layout-search-gap)] truncate text-ui-medium leading-none text-[var(--color-accent)]" title={resultTitle}>
+                    <div className="pr-[calc(var(--font-title)*2.4)] text-ui-large font-bold leading-none text-[var(--color-text-main)]">诊断结果</div>
+                    <div className={`absolute right-[var(--layout-content-gap)] top-[var(--layout-content-gap)] font-mono text-app-title font-bold leading-none ${resultToneClass}`}>{resultScore}</div>
+                    <div className={`mt-[var(--layout-search-gap)] truncate text-ui-medium leading-none ${resultToneClass}`} title={resultTitle}>
                       {resultTitle}
                     </div>
-                    {diagnosis?.work_order_id && (
-                      <div className="mt-[var(--layout-search-gap)] truncate text-ui-small text-[var(--color-text-muted)]" title={diagnosis.work_order_id}>
-                        已生成工单：{diagnosis.work_order_id}
-                      </div>
-                    )}
                   </div>
                 </section>
 
@@ -1116,11 +1160,13 @@ function VideoDiagnosisView({ camera, onClose }) {
                 </section>
 
                 <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
-                  <div className="mb-[var(--layout-search-padding-y)] flex items-center gap-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]">
-                    <Activity size="var(--icon-topbar)" className="text-[var(--color-accent)]" />
-                    处置建议
-                  </div>
+                  <div className="mb-[var(--layout-search-padding-y)] text-ui-large font-bold text-[var(--color-text-main)]">处置建议</div>
                   <div className="text-ui-medium leading-relaxed text-[var(--color-text-main)]">{buildDisposalSuggestion(camera, diagnosis)}</div>
+                  {diagnosis?.work_order_id && (
+                    <div className="mt-[var(--layout-search-gap)] truncate text-ui-small text-[var(--color-text-muted)]" title={diagnosis.work_order_id}>
+                      已生成工单：{diagnosis.work_order_id}
+                    </div>
+                  )}
                 </section>
               </>
             )}
@@ -1423,7 +1469,7 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
               <>
                 <Field label="状态" name="status" value={form.status} onChange={onChange} options={[{ label: "在线", value: "online" }, { label: "异常", value: "fault" }, { label: "离线", value: "offline" }]} />
                 <Field label="协议" name="protocol" value={form.protocol} onChange={onChange} options={[{ label: "RTSP", value: "RTSP" }, { label: "GB28181", value: "GB28181" }, { label: "ONVIF", value: "ONVIF" }, { label: "HTTP-FLV", value: "HTTP-FLV" }]} />
-                <Field label="编码" name="codec" value={form.codec} onChange={onChange} options={[{ label: "H.264", value: "H.264" }, { label: "H.265", value: "H.265" }, { label: "MJPEG", value: "MJPEG" }]} />
+                <Field label="编码格式" name="codec" value={form.codec} onChange={onChange} options={[{ label: "H.264", value: "H.264" }, { label: "H.265", value: "H.265" }, { label: "MJPEG", value: "MJPEG" }]} />
                 <Field label="码流类型" name="stream_type" value={form.stream_type} onChange={onChange} options={[{ label: "主码流", value: "main" }, { label: "子码流", value: "sub" }, { label: "第三码流", value: "third" }]} />
                 <Field label="接入方式" name="access_type" value={form.access_type} onChange={onChange} options={[{ label: "以太网", value: "Ethernet" }, { label: "光纤", value: "Fiber" }, { label: "Wi-Fi", value: "Wi-Fi" }, { label: "4G", value: "4G" }, { label: "5G", value: "5G" }]} />
                 <Field label="绑定服务器" name="server_id" value={form.server_id} onChange={onChange} options={[{ label: "未绑定", value: "" }, ...servers.map((server) => ({ label: `${server.name} (${server.id})`, value: server.id }))]} />
@@ -1672,7 +1718,7 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
           { key: "ip", label: "摄像机IP" },
           { key: "status", label: "状态" },
           { key: "protocol", label: "协议" },
-          { key: "codec", label: "编码" },
+          { key: "codec", label: "编码格式" },
           { key: "stream_type", label: "码流类型" },
           { key: "access_type", label: "接入方式" },
         ]);
@@ -1771,8 +1817,6 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
       className: "min-w-[8rem]",
       render: (row) => <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${statusClass(row.status)}`}>{cameraStatusText(row.status)}</span>,
     },
-    { key: "protocol", label: "协议", className: "min-w-[8rem]" },
-    { key: "codec", label: "编码", className: "min-w-[8rem]" },
     { key: "town_name", label: "所属乡镇", className: "min-w-[12rem]" },
     { key: "location_desc", label: "位置", className: "min-w-[24rem]" },
     { key: "server_id", label: "绑定服务器", className: "min-w-[12rem]" },
@@ -1815,13 +1859,23 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
       </section>
 
       <section className="flex min-h-0 flex-1 flex-col gap-[var(--layout-content-gap)] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
-        <header className="flex shrink-0 flex-wrap items-center gap-[var(--layout-content-gap)]">
-          <div className="flex min-w-0 items-center gap-[var(--layout-content-gap)]">
-            <div className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">设备管理</div>
-            <div className="min-w-0 truncate text-ui-medium text-[var(--color-text-muted)]">{scopeText}</div>
+        <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-[var(--layout-content-gap)] gap-y-[var(--layout-search-gap)]">
+          <div className="min-w-0 truncate text-ui-large font-bold text-[var(--color-text-main)]" title={scopeText}>
+            {scopeText}
           </div>
 
-          <div className="ml-[calc(var(--layout-content-padding)*3)] grid min-w-0 grid-cols-3 rounded-[var(--layout-radius-lg)] bg-[var(--color-control-bg)] p-[var(--layout-segment-padding)] text-ui-medium">
+          <div className="flex min-w-0 items-center justify-end gap-[var(--layout-search-gap)]">
+            <div className="flex min-h-[var(--layout-search-height)] w-[min(22rem,24vw)] min-w-[16rem] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)]">
+              <Search size="var(--icon-search)" className="text-[var(--color-icon-muted)]" />
+              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索名称、IP、ID" className="min-w-0 flex-1 bg-transparent text-ui-medium text-[var(--color-text-main)] outline-none placeholder:text-[var(--color-text-muted)]" />
+            </div>
+            <button type="button" onClick={loadData} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-medium text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+              <RefreshCw size="var(--icon-bottom)" />
+              刷新
+            </button>
+          </div>
+
+          <div className="grid w-fit min-w-0 grid-cols-3 rounded-[var(--layout-radius-lg)] bg-[var(--color-control-bg)] p-[var(--layout-segment-padding)] text-ui-medium">
             {[
               { key: "camera", label: "摄像机", icon: Camera },
               { key: "server", label: "服务器", icon: Server },
@@ -1835,7 +1889,7 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
                   setDiagnosisCamera(null);
                   setActiveTab(key);
                 }}
-                className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
+                className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] whitespace-nowrap rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
               >
                 <Icon size="var(--icon-bottom)" />
                 {label}
@@ -1843,22 +1897,13 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
             ))}
           </div>
 
-          {activeTab !== "stream" && (
-            <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
-              <Plus size="var(--icon-bottom)" />
-              {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
-            </button>
-          )}
-
-          <div className="ml-auto flex min-w-0 items-center gap-[var(--layout-search-gap)]">
-            <div className="flex min-h-[var(--layout-search-height)] min-w-[24rem] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)]">
-              <Search size="var(--icon-search)" className="text-[var(--color-icon-muted)]" />
-              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索名称、IP、ID" className="min-w-0 flex-1 bg-transparent text-ui-medium text-[var(--color-text-main)] outline-none placeholder:text-[var(--color-text-muted)]" />
-            </div>
-            <button type="button" onClick={loadData} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-medium text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
-              <RefreshCw size="var(--icon-bottom)" />
-              刷新
-            </button>
+          <div className="flex justify-end">
+            {activeTab !== "stream" && (
+              <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
+                <Plus size="var(--icon-bottom)" />
+                {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
+              </button>
+            )}
           </div>
         </header>
 

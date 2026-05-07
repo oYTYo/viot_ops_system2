@@ -1,7 +1,29 @@
 import axios from "axios";
 
+function getDefaultApiBaseUrl() {
+  return "/api/backend";
+}
+
+function getApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (!configured) return getDefaultApiBaseUrl();
+
+  if (typeof window !== "undefined") {
+    try {
+      const url = new URL(configured, window.location.origin);
+      if (["127.0.0.1", "localhost"].includes(url.hostname)) {
+        return getDefaultApiBaseUrl();
+      }
+    } catch {
+      return configured;
+    }
+  }
+
+  return configured;
+}
+
 const request = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000",
+  baseURL: getApiBaseUrl(),
   timeout: 15000,
 });
 

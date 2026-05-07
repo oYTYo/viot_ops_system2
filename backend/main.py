@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from random import randint
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import models
@@ -41,6 +41,7 @@ app.add_middleware(
 def create_runtime_tables() -> None:
     models.WorkOrder.__table__.create(bind=engine, checkfirst=True)
     models.VideoDiagnosis.__table__.create(bind=engine, checkfirst=True)
+    _normalize_existing_camera_protocols()
 
 
 def get_db():
@@ -256,6 +257,26 @@ def _ensure_entity_exists(db: Session, entity_type: str, entity_id: str) -> None
 
     if not db.get(model, entity_id):
         raise HTTPException(status_code=400, detail=f"{entity_type} '{entity_id}' does not exist")
+
+
+def _normalize_camera_protocol_value(protocol: str | None) -> str | None:
+    if not protocol:
+        return protocol
+    return "RTSP" if protocol.upper() in {"RTP", "RTSP"} else protocol
+
+
+def _normalize_existing_camera_protocols() -> None:
+    db = SessionLocal()
+    try:
+        db.query(models.Camera).filter(models.Camera.protocol == "RTP").update(
+            {models.Camera.protocol: "RTSP"},
+            synchronize_session=False,
+        )
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _collect_region_descendant_codes(db: Session, region_code: str) -> list[str]:
@@ -1217,6 +1238,7 @@ def create_camera(payload: schemas.CameraCreate, db: Session = Depends(get_db)):
     )
 
     data = payload.model_dump()
+    data["protocol"] = _normalize_camera_protocol_value(data.get("protocol"))
     _normalize_camera_region_names(data, province, city, county, town)
 
     obj = models.Camera(**data)
@@ -1311,6 +1333,8 @@ def update_camera(camera_id: str, payload: schemas.CameraUpdate, db: Session = D
         raise HTTPException(status_code=404, detail="camera not found")
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "protocol" in update_data:
+        update_data["protocol"] = _normalize_camera_protocol_value(update_data.get("protocol"))
 
     if "server_id" in update_data:
         _ensure_server_exists(db, update_data["server_id"])
@@ -2419,4 +2443,302 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         "avg_latency": round(avg_latency, 2),
         "avg_packet_loss_rate": round(avg_packet_loss_rate, 3),
         "avg_qoe_score": round(avg_qoe_score, 2),
+    }
+
+
+def _status_bucket(status: str | None) -> str:
+    if status in {"offline", "disconnected"}:
+        return "offline"
+    if status in {"fault", "warning", "abnormal"}:
+        return "fault"
+    return "normal"
+
+
+def _stream_reconstruction_error(stream: models.StreamMedia) -> float:
+    latency = max((stream.latency or 0) - 80, 0) / 240
+    jitter = max((stream.jitter or 0) - 8, 0) / 60
+    loss = max(stream.packet_loss_rate or 0, 0) / 8
+    throughput_drop = max(8 - (stream.throughput or 8), 0) / 8
+    qoe_drop = max(100 - (stream.qoe_score or 100), 0) / 100
+    disconnected = 1 if not stream.is_connected else 0
+    fault = 0.45 if stream.is_fault else 0
+    return min(1.0, latency * 0.2 + jitter * 0.16 + loss * 0.22 + throughput_drop * 0.12 + qoe_drop * 0.15 + disconnected * 0.4 + fault)
+
+
+def _date_key(value: datetime | None) -> str | None:
+    if not value:
+        return None
+    return value.strftime("%m-%d")
+
+
+def _is_abnormal_diagnosis(diagnosis: models.VideoDiagnosis) -> bool:
+    abnormal_type = diagnosis.abnormal_type or ""
+    return bool(abnormal_type) and abnormal_type not in {"正常", "无明显异常"}
+
+
+def _representative_pattern(value: str | None, fallback: str | None = None) -> str:
+    text = value or fallback or "未分类异常"
+    if any(token in text for token in ["CPU", "处理器", "转码负荷"]):
+        return "CPU负载过高"
+    if any(token in text for token in ["内存", "可用内存"]):
+        return "内存资源不足"
+    if any(token in text for token in ["磁盘", "I/O", "IO"]):
+        return "磁盘 I/O 阻塞"
+    if any(token in text for token in ["丢包", "关键帧丢失", "花屏"]):
+        return "网络丢包率过高"
+    if any(token in text for token in ["抖动", "重传", "卡顿"]):
+        return "网络抖动与重传"
+    if any(token in text for token in ["吞吐", "码率"]):
+        return "链路吞吐量下降"
+    if any(token in text for token in ["心跳", "疑似离线", "设备离线", "长时间未上报"]):
+        return "摄像机离线"
+    if any(token in text for token in ["视频流", "媒体流", "断连", "不可达", "无响应", "缓冲区溢出"]):
+        return "视频链路断连"
+    if "乱序" in text:
+        return "网络乱序率过高"
+    return text[:32]
+
+
+def _entity_category_from_diagnosis(diagnosis: models.VideoDiagnosis) -> str:
+    node = diagnosis.root_cause_node or ""
+    metric = diagnosis.root_cause_metric or ""
+    cause_type = diagnosis.root_cause_type or ""
+    text = f"{node} {metric} {cause_type}"
+    if node == "无":
+        return "无"
+    if "下行" in text or "客户端" in text:
+        return "下行链路"
+    if "上行" in text or "接入网络" in text or "链路" in text and "服务器" not in text:
+        return "上行链路"
+    if "服务器" in text or "CPU" in text or "转码" in text or "网卡缓冲区" in text:
+        return "流媒体服务器"
+    if "客户端" in text:
+        return "客户端"
+    return "摄像机"
+
+
+def _entity_category_from_fault(fault: models.FaultEvent) -> str:
+    if fault.entity_type == "server":
+        return "流媒体服务器"
+    if fault.entity_type == "network_node":
+        return "上行链路"
+    return "摄像机"
+
+
+@app.get("/statistics/overview", response_model=schemas.StatisticsOverviewRead)
+def get_statistics_overview(
+    region_code: str | None = Query(default=None),
+    camera_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    now = datetime.utcnow()
+    start_day = (now - timedelta(days=6)).date()
+    days = [(start_day + timedelta(days=index)).strftime("%m-%d") for index in range(7)]
+
+    scope = {"type": "all", "code": None, "name": "全部区域"}
+    camera_query = db.query(models.Camera)
+    region_codes: list[str] | None = None
+
+    if camera_id:
+        camera = db.get(models.Camera, camera_id)
+        if not camera:
+            raise HTTPException(status_code=404, detail="camera not found")
+        region_code = camera.town_code
+        scope = {"type": "camera_region", "code": camera.town_code, "name": camera.town_name or camera.name}
+
+    if region_code:
+        region_codes = _collect_region_descendant_codes(db, region_code)
+        camera_query = camera_query.filter(models.Camera.town_code.in_(region_codes))
+        region = db.get(models.AdministrativeRegion, region_code)
+        if region:
+            scope = {"type": "region", "code": region.region_code, "name": region.region_name}
+
+    cameras = camera_query.all()
+    camera_ids = {camera.id for camera in cameras}
+    server_ids = {camera.server_id for camera in cameras if camera.server_id}
+
+    stream_query = db.query(models.StreamMedia)
+    if region_code or camera_id:
+        stream_query = stream_query.filter(models.StreamMedia.camera_id.in_(camera_ids or {"__none__"}))
+    streams = stream_query.all()
+    server_ids.update(stream.server_id for stream in streams if stream.server_id)
+
+    server_query = db.query(models.Server)
+    if region_code or camera_id:
+        server_query = server_query.filter(models.Server.id.in_(server_ids or {"__none__"}))
+    servers = server_query.all()
+    server_ids = {server.id for server in servers}
+
+    diagnosis_query = db.query(models.VideoDiagnosis)
+    if region_code or camera_id:
+        diagnosis_query = diagnosis_query.filter(models.VideoDiagnosis.camera_id.in_(camera_ids or {"__none__"}))
+    diagnoses = diagnosis_query.all()
+
+    work_order_query = db.query(models.WorkOrder)
+    if region_code or camera_id:
+        work_order_query = work_order_query.filter(
+            or_(
+                models.WorkOrder.region_code.in_(region_codes or []),
+                models.WorkOrder.related_entity_id.in_(camera_ids | server_ids),
+            )
+        )
+    work_orders = work_order_query.all()
+
+    fault_query = db.query(models.FaultEvent)
+    if region_code or camera_id:
+        fault_query = fault_query.filter(models.FaultEvent.entity_id.in_(camera_ids | server_ids))
+    faults = fault_query.all()
+
+    camera_status = Counter(_status_bucket(camera.status) for camera in cameras)
+    server_status = Counter(_status_bucket(server.status) for server in servers)
+    stream_status = Counter(
+        "offline" if not stream.is_connected else "fault" if stream.is_fault else "normal"
+        for stream in streams
+    )
+
+    weighted_score = 0.0
+    weight_total = 0.0
+    for stream in streams:
+        weight = max(stream.real_time_bitrate or stream.throughput or 1, 1)
+        anomaly_score = _stream_reconstruction_error(stream) * 100
+        weighted_score += anomaly_score * weight
+        weight_total += weight
+    global_anomaly_score = weighted_score / weight_total if weight_total else 0
+    global_health = max(0, min(100, 100 - global_anomaly_score))
+
+    total_streams = max(len(streams), 1)
+    latest_diagnoses_by_camera: dict[str, models.VideoDiagnosis] = {}
+    for diagnosis in diagnoses:
+        current = latest_diagnoses_by_camera.get(diagnosis.camera_id)
+        if not current or diagnosis.started_at > current.started_at:
+            latest_diagnoses_by_camera[diagnosis.camera_id] = diagnosis
+
+    diagnosis_abnormal = Counter(
+        diagnosis.abnormal_type
+        for diagnosis in latest_diagnoses_by_camera.values()
+        if _is_abnormal_diagnosis(diagnosis)
+    )
+    disconnected_count = len([stream for stream in streams if not stream.is_connected])
+    if not diagnosis_abnormal and streams:
+        diagnosis_abnormal = Counter(
+            {
+                "卡顿": len([stream for stream in streams if stream.latency and stream.latency > 150]),
+                "拖影": len([stream for stream in streams if stream.jitter and stream.jitter > 25]),
+                "花屏": len([stream for stream in streams if stream.packet_loss_rate and stream.packet_loss_rate > 1.5]),
+            }
+        )
+    kqi_degradation = [
+        {"name": "画面卡顿", "count": diagnosis_abnormal.get("卡顿", 0), "ratio": round(diagnosis_abnormal.get("卡顿", 0) / total_streams * 100, 2)},
+        {"name": "画面拖影", "count": diagnosis_abnormal.get("拖影", 0), "ratio": round(diagnosis_abnormal.get("拖影", 0) / total_streams * 100, 2)},
+        {"name": "画面花屏", "count": diagnosis_abnormal.get("花屏", 0), "ratio": round(diagnosis_abnormal.get("花屏", 0) / total_streams * 100, 2)},
+        {"name": "流断连", "count": disconnected_count, "ratio": round(disconnected_count / total_streams * 100, 2)},
+    ]
+
+    anomaly_by_day = {day: 0 for day in days}
+    for diagnosis in diagnoses:
+        if diagnosis.started_at and diagnosis.started_at.date() >= start_day and _is_abnormal_diagnosis(diagnosis):
+            key = _date_key(diagnosis.started_at)
+            if key in anomaly_by_day:
+                anomaly_by_day[key] += 1
+    for fault in faults:
+        if fault.trigger_time and fault.trigger_time.date() >= start_day:
+            key = _date_key(fault.trigger_time)
+            if key in anomaly_by_day:
+                anomaly_by_day[key] += 1
+    anomaly_trend = [{"date": day, "count": anomaly_by_day[day]} for day in days]
+
+    created_by_day = {day: 0 for day in days}
+    closed_by_day = {day: 0 for day in days}
+    for order in work_orders:
+        if order.created_at and order.created_at.date() >= start_day:
+            key = _date_key(order.created_at)
+            if key in created_by_day:
+                created_by_day[key] += 1
+        if order.closed_at and order.closed_at.date() >= start_day:
+            key = _date_key(order.closed_at)
+            if key in closed_by_day:
+                closed_by_day[key] += 1
+    work_order_trend = [
+        {"date": day, "created": created_by_day[day], "resolved": closed_by_day[day]}
+        for day in days
+    ]
+
+    pattern_counter: Counter[str] = Counter()
+    entity_counter: Counter[str] = Counter()
+    for diagnosis in diagnoses:
+        if _is_abnormal_diagnosis(diagnosis):
+            pattern_counter[_representative_pattern(diagnosis.root_cause_metric, diagnosis.abnormal_type)] += 1
+            entity = _entity_category_from_diagnosis(diagnosis)
+            if entity != "无":
+                entity_counter[entity] += 1
+    for fault in faults:
+        pattern_counter[_representative_pattern(fault.fault_desc, fault.category_l3)] += 1
+        entity_counter[_entity_category_from_fault(fault)] += 1
+
+    if not pattern_counter:
+        for stream in streams:
+            if not stream.is_connected:
+                pattern_counter["视频链路断连"] += 1
+                entity_counter["上行链路"] += 1
+            elif stream.is_fault:
+                pattern_counter["网络指标异常"] += 1
+                entity_counter["上行链路"] += 1
+
+    closed_orders = [order for order in work_orders if order.closed_at]
+    close_rate = (len(closed_orders) / len(work_orders) * 100) if work_orders else 0
+    resolve_hours = [
+        (order.closed_at - order.created_at).total_seconds() / 3600
+        for order in closed_orders
+        if order.created_at and order.closed_at and order.closed_at >= order.created_at
+    ]
+    avg_resolve_hours = sum(resolve_hours) / len(resolve_hours) if resolve_hours else 0
+
+    return {
+        "generated_at": now,
+        "scope": scope,
+        "device_status": {
+            "cameras": {
+                "normal": camera_status.get("normal", 0),
+                "fault": camera_status.get("fault", 0),
+                "offline": camera_status.get("offline", 0),
+                "total": len(cameras),
+            },
+            "streams": {
+                "normal": stream_status.get("normal", 0),
+                "fault": stream_status.get("fault", 0),
+                "offline": stream_status.get("offline", 0),
+                "total": len(streams),
+            },
+            "servers": {
+                "normal": server_status.get("normal", 0),
+                "fault": server_status.get("fault", 0),
+                "offline": server_status.get("offline", 0),
+                "total": len(servers),
+            },
+        },
+        "golden_metrics": {
+            "global_stream_health": round(global_health, 2),
+            "global_anomaly_score": round(global_anomaly_score, 2),
+            "formula": "全局健康度 = 100 - 加权平均异常分数。异常分数由每条流链路的 reconstruction_error 归一化得到，权重取实时码率/吞吐量。",
+            "formula_latex": "全局健康度 = 100 - 加权平均异常分数",
+            "sample_count": len(streams),
+        },
+        "kqi_degradation": kqi_degradation,
+        "anomaly_trend": anomaly_trend,
+        "work_order_trend": work_order_trend,
+        "anomaly_patterns": [
+            {"name": name, "count": count}
+            for name, count in pattern_counter.most_common(6)
+        ],
+        "anomaly_entities": [
+            {"name": name, "count": count}
+            for name, count in entity_counter.most_common(6)
+        ],
+        "work_order_efficiency": {
+            "total": len(work_orders),
+            "resolved": len(closed_orders),
+            "pending": len([order for order in work_orders if order.status not in {"closed", "cancelled"}]),
+            "resolve_rate": round(close_rate, 2),
+            "avg_resolve_hours": round(avg_resolve_hours, 2),
+        },
     }

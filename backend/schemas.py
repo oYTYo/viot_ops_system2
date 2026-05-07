@@ -665,3 +665,16 @@ class DashboardSummaryRead(BaseModel):
     avg_latency: float
     avg_packet_loss_rate: float
     avg_qoe_score: float
+
+
+class StatisticsOverviewRead(BaseModel):
+    generated_at: datetime
+    scope: dict[str, Any]
+    device_status: dict[str, dict[str, int]]
+    golden_metrics: dict[str, Any]
+    kqi_degradation: list[dict[str, Any]]
+    anomaly_trend: list[dict[str, Any]]
+    work_order_trend: list[dict[str, Any]]
+    anomaly_patterns: list[dict[str, Any]]
+    anomaly_entities: list[dict[str, Any]]
+    work_order_efficiency: dict[str, Any]

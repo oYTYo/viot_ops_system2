@@ -45,10 +45,13 @@ function VideoTile({ stream, selected, onSelect, onClose, onOpenDetail, nowText 
       }}
       className={`relative min-h-0 overflow-hidden rounded-[var(--layout-radius-md)] border bg-black text-left shadow-[var(--shadow-panel)] transition-colors ${
         selected
-          ? "border-[var(--color-accent)]"
+          ? "border-[var(--color-accent)] shadow-[0_0_0_calc(var(--font-small)*0.08)_var(--color-accent),0_0_calc(var(--font-large)*0.75)_var(--color-accent)]"
           : "border-[var(--color-panel-border)]"
       }`}
     >
+      {selected && (
+        <div className="pointer-events-none absolute inset-0 z-20 rounded-[var(--layout-radius-md)] border-[calc(var(--font-small)*0.1)] border-[var(--color-accent)] shadow-[inset_0_0_calc(var(--font-large)*0.6)_var(--color-accent)]" />
+      )}
       {stream ? (
         <>
           {stream.status === "connecting" ? (

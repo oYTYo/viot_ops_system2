@@ -61,6 +61,15 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss(), amapDistrictProxy(env)],
+    server: {
+      proxy: {
+        "/api/backend": {
+          target: env.VITE_BACKEND_PROXY_TARGET || "http://127.0.0.1:8000",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/backend/, ""),
+        },
+      },
+    },
     define: {
       "import.meta.env.VITE_AMAP_KEY": JSON.stringify(
         env.VITE_AMAP_KEY || env.AMAP_KEY || ""

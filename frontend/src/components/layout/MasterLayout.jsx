@@ -22,12 +22,18 @@ import {
   Loader2,
   AlertCircle,
   Network,
+  Joystick,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from "lucide-react";
 import logo from "../../assets/bupt.png";
 import VideoBrowse from "../../pages/VideoBrowse";
 import MapView from "../../pages/MapView";
 import DeviceManage from "../../pages/DeviceManage";
 import WorkOrderManage from "../../pages/WorkOrderManage";
+import StatisticsView from "../../pages/StatisticsView";
 import { getCameraPreview } from "../../services/videoApi";
 
 
@@ -45,7 +51,7 @@ const COUNTRY_NODE_ID = "country-100000-cn";
 
 const tabs = [
   { key: "video", label: "视频浏览", icon: Video },
-  { key: "map", label: "电子地图", icon: Map },
+  { key: "map", label: "运维大屏", icon: Map },
   { key: "device", label: "设备管理", icon: Database },
   { key: "ticket", label: "工单管理", icon: ClipboardList },
   { key: "stats", label: "统计数据", icon: BarChart3 },
@@ -233,6 +239,7 @@ function updateFavoriteNodes(favoriteNodes, targetId, updater) {
 
 function toFavoriteNode(node) {
   const isCamera = node.nodeType === "camera";
+  const displayName = repairText(node.name || node.raw?.region_name || node.raw?.name || "未命名节点");
 
   return {
     id: node.id,
@@ -241,7 +248,7 @@ function toFavoriteNode(node) {
     regionCode: node.regionCode || "",
     adcode: node.adcode || "",
     citycode: node.citycode || "",
-    name: node.name || "未命名节点",
+    name: displayName,
     level: node.level || (isCamera ? "camera" : "unknown"),
     center: node.center || "",
     longitude: node.longitude,
@@ -569,6 +576,7 @@ function Sidebar({
   sidebarWidth,
   setSidebarWidth,
   previewingCameraIds,
+  ptzOpen,
   onCameraDoubleClick,
   onNodeDoubleClick,
 }) {
@@ -653,6 +661,8 @@ function Sidebar({
   }, [resetVersion]);
 
   useEffect(() => {
+    if (mode === "favorite") return;
+
     const timer = window.setTimeout(() => {
       refreshRegionTreeKeepExpanded(cameraStatusFilter);
     }, 180);
@@ -663,7 +673,7 @@ function Sidebar({
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraStatusFilter]);
+  }, [cameraStatusFilter, mode]);
 
   useEffect(() => {
     if (!resizing) return;
@@ -982,6 +992,8 @@ function Sidebar({
       return;
     }
 
+    setFavoriteDisplayNodes(sourceNodes);
+
     try {
       const nextNodes = await Promise.all(
         sourceNodes.map((node) =>
@@ -1223,8 +1235,79 @@ function Sidebar({
         }}
       />
 
+      {ptzOpen && <PtzControlPanel />}
       
     </aside>
+  );
+}
+
+function PtzControlPanel() {
+  const [ptzSpeed, setPtzSpeed] = useState(50);
+  const directionButtons = [
+    { key: "up-left", label: "左上", className: "col-start-1 row-start-1", symbol: "↖" },
+    { key: "up", label: "上", className: "col-start-2 row-start-1", icon: ArrowUp },
+    { key: "up-right", label: "右上", className: "col-start-3 row-start-1", symbol: "↗" },
+    { key: "left", label: "左", className: "col-start-1 row-start-2", icon: ArrowLeft },
+    { key: "center", label: "停止", className: "col-start-2 row-start-2", symbol: "●" },
+    { key: "right", label: "右", className: "col-start-3 row-start-2", icon: ArrowRight },
+    { key: "down-left", label: "左下", className: "col-start-1 row-start-3", symbol: "↙" },
+    { key: "down", label: "下", className: "col-start-2 row-start-3", icon: ArrowDown },
+    { key: "down-right", label: "右下", className: "col-start-3 row-start-3", symbol: "↘" },
+  ];
+
+  const quickActions = ["放大", "缩小", "聚焦", "巡航", "复位", "光圈", "框选", "预置位"];
+  const speedText = ptzSpeed < 34 ? "低速" : ptzSpeed > 66 ? "高速" : "中速";
+
+  return (
+    <div data-ptz-panel className="absolute bottom-[var(--layout-sidebar-padding)] left-[var(--layout-sidebar-padding)] z-40 w-[calc(100%_-_var(--layout-sidebar-padding)*2)] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-sidebar-padding)] text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
+      <div className="mb-[var(--layout-content-gap)] flex items-center justify-between gap-[var(--layout-search-gap)]">
+        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+          <Joystick size="var(--icon-bottom)" className="shrink-0 text-[var(--color-accent)]" />
+          <span className="truncate text-ui-medium font-semibold">云台控制</span>
+        </div>
+      </div>
+
+      <div className="mb-[var(--layout-content-gap)]">
+        <div className="mb-[var(--layout-search-padding-y)] flex items-center justify-between text-ui-small text-[var(--color-text-muted)]">
+          <span>云台速度</span>
+          <span>{speedText}</span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={ptzSpeed}
+          onChange={(event) => setPtzSpeed(Number(event.target.value))}
+          style={{ "--ptz-speed": `${ptzSpeed}%` }}
+          className="h-[calc(var(--font-small)*0.7)] w-full cursor-pointer appearance-none rounded-full bg-[linear-gradient(90deg,var(--color-accent)_0_var(--ptz-speed),var(--color-control-bg)_var(--ptz-speed)_100%)] accent-[var(--color-accent)] [&::-moz-range-thumb]:h-[var(--icon-status)] [&::-moz-range-thumb]:w-[var(--icon-status)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--color-accent)] [&::-webkit-slider-thumb]:h-[var(--icon-status)] [&::-webkit-slider-thumb]:w-[var(--icon-status)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-accent)]"
+        />
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)] items-center gap-[var(--layout-search-gap)]">
+        <div className="grid justify-start">
+          <div className="grid aspect-square w-[calc(var(--font-large)*6)] grid-cols-3 grid-rows-3 rounded-full border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-gap)] shadow-[inset_0_0_calc(var(--font-large)*0.5)_rgba(0,0,0,0.14)]">
+            {directionButtons.map(({ key, label, className, icon: Icon, symbol }) => (
+              <button key={key} type="button" title={label} className={`grid place-items-center rounded-full text-ui-small text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)] active:bg-[var(--color-accent)] active:text-[var(--color-topbar-active-text)] ${className}`}>
+                {Icon ? <Icon size="var(--icon-bottom)" /> : <span>{symbol}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-[var(--layout-search-gap)]">
+          {quickActions.map((label) => (
+            <button key={label} type="button" title={label} className="flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)] active:bg-[var(--color-accent)] active:text-[var(--color-topbar-active-text)]">
+              <span className="whitespace-nowrap">{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-[var(--layout-content-gap)] grid grid-cols-2 gap-[var(--layout-search-gap)]">
+        <button type="button" className="min-h-[var(--layout-segment-button-height)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-main)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">设置预置点</button>
+        <button type="button" className="min-h-[var(--layout-segment-button-height)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-main)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">调用预置点</button>
+      </div>
+    </div>
   );
 }
 
@@ -1243,6 +1326,7 @@ function ContentPlaceholder({
   mapFocusTarget,
   deviceFocusTarget,
   ticketFocusTarget,
+  statsFocusTarget,
   darkMode,
   onSelectVideoSlot,
   onCloseVideoSlot,
@@ -1277,6 +1361,10 @@ function ContentPlaceholder({
     return <WorkOrderManage focusTarget={ticketFocusTarget} />;
   }
 
+  if (activeTab === "stats") {
+    return <StatisticsView focusTarget={statsFocusTarget} />;
+  }
+
   const title = tabs.find((tab) => tab.key === activeTab)?.label || "内容";
 
   return (
@@ -1304,6 +1392,8 @@ function BottomBar({
   onResetSidebar,
   videoGridSize,
   onVideoGridSizeChange,
+  ptzOpen,
+  onTogglePtz,
 }) {
   return (
     <footer className="flex h-[var(--layout-footer-height)] shrink-0 border-t border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-ui-small text-[var(--color-text-muted)] transition-colors">
@@ -1322,13 +1412,27 @@ function BottomBar({
           className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-reset-padding-x)] py-[var(--layout-reset-padding-y)] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"
         >
           <RefreshCw size="var(--icon-bottom)" />
-          <span>更多功能未完待续...</span>
         </button>
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-between overflow-hidden px-[var(--layout-content-padding)]">
-        <div className="truncate">
-          {getPageBottomHint(activeTab)}
+        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+          <span className="truncate">{getPageBottomHint(activeTab)}</span>
+          {activeTab === "video" && (
+            <button
+              data-ptz-trigger
+              type="button"
+              title="云台控制"
+              onClick={onTogglePtz}
+              className={`flex h-[var(--layout-bottom-button-size)] w-[var(--layout-bottom-button-size)] shrink-0 items-center justify-center rounded-[var(--layout-radius-sm)] transition-colors ${
+                ptzOpen
+                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"
+              }`}
+            >
+              <Joystick size="var(--icon-bottom)" />
+            </button>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
@@ -1345,7 +1449,7 @@ function BottomBar({
 function getPageBottomHint(activeTab) {
   const map = {
     video: "视频浏览工具栏",
-    map: "电子地图工具栏",
+    map: "运维大屏工具栏",
     device: "设备管理工具栏",
     ticket: "工单管理工具栏",
     stats: "统计数据工具栏",
@@ -1400,7 +1504,7 @@ function getPageBottomActions(activeTab, options = {}) {
     return <span>后续可扩展工单筛选、派发、关闭等工具</span>;
   }
 
-  if (activeTab === "statistics") {
+  if (activeTab === "stats") {
     return <span>后续可扩展时间范围、报表导出等工具</span>;
   }
 
@@ -1421,9 +1525,11 @@ export default function VioTMasterLayout() {
   const [videoStreams, setVideoStreams] = useState([]);
   const [selectedVideoSlot, setSelectedVideoSlot] = useState(0);
   const [videoConnectionError, setVideoConnectionError] = useState("");
+  const [ptzOpen, setPtzOpen] = useState(false);
   const [mapFocusTarget, setMapFocusTarget] = useState(null);
   const [deviceFocusTarget, setDeviceFocusTarget] = useState(null);
   const [ticketFocusTarget, setTicketFocusTarget] = useState(null);
+  const [statsFocusTarget, setStatsFocusTarget] = useState(null);
   const externalDetailReturnTabRef = useRef("");
   const offlinePreviewTimersRef = useRef({});
 
@@ -1436,6 +1542,30 @@ export default function VioTMasterLayout() {
       ),
     [videoStreams]
   );
+
+  useEffect(() => {
+    if (!ptzOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-ptz-panel]") || target.closest("[data-ptz-trigger]")) return;
+
+      setPtzOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [ptzOpen]);
+
+  useEffect(() => {
+    if (activeTab !== "video") {
+      setPtzOpen(false);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     return () => {
@@ -1602,6 +1732,14 @@ export default function VioTMasterLayout() {
         ...node,
         version: Date.now(),
       });
+      return;
+    }
+
+    if (activeTab === "stats") {
+      setStatsFocusTarget({
+        ...node,
+        version: Date.now(),
+      });
     }
   };
 
@@ -1625,6 +1763,7 @@ export default function VioTMasterLayout() {
           sidebarWidth={sidebarWidth}
           setSidebarWidth={setSidebarWidth}
           previewingCameraIds={previewingCameraIds}
+          ptzOpen={activeTab === "video" && ptzOpen}
           onCameraDoubleClick={handleCameraDoubleClick}
           onNodeDoubleClick={handleNavNodeDoubleClick}
         />
@@ -1642,6 +1781,7 @@ export default function VioTMasterLayout() {
           mapFocusTarget={mapFocusTarget}
           deviceFocusTarget={deviceFocusTarget}
           ticketFocusTarget={ticketFocusTarget}
+          statsFocusTarget={statsFocusTarget}
           darkMode={darkMode}
           onClearVideoConnectionError={() => setVideoConnectionError("")}
         />
@@ -1652,6 +1792,8 @@ export default function VioTMasterLayout() {
         sidebarWidth={sidebarWidth}
         videoGridSize={videoGridSize}
         onVideoGridSizeChange={handleVideoGridSizeChange}
+        ptzOpen={ptzOpen}
+        onTogglePtz={() => setPtzOpen((value) => !value)}
         onResetSidebar={() => {
           setSidebarWidth(null);
           setResetVersion((value) => value + 1);
