@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -42,12 +42,354 @@ def create_runtime_tables() -> None:
     models.WorkOrder.__table__.create(bind=engine, checkfirst=True)
     models.VideoDiagnosis.__table__.create(bind=engine, checkfirst=True)
     _normalize_existing_camera_protocols()
+    _ensure_huli_alarm_demo_cameras()
+    _ensure_huli_fake_camera_fleet()
 
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+
+def _ensure_huli_alarm_demo_cameras() -> None:
+    db = SessionLocal()
+    try:
+        province = db.get(models.AdministrativeRegion, "350000")
+        city = db.get(models.AdministrativeRegion, "350200")
+        county = db.get(models.AdministrativeRegion, "350206")
+        if not province or not city or not county:
+            return
+
+        towns = (
+            db.query(models.AdministrativeRegion)
+            .filter(models.AdministrativeRegion.parent_code == county.region_code)
+            .filter(models.AdministrativeRegion.level == "town")
+            .all()
+        )
+        town_by_name = {town.region_name: town for town in towns}
+        fallback_town = towns[0] if towns else None
+        if not fallback_town:
+            return
+
+        server = db.get(models.Server, "srv-huli-alarm-demo")
+        if not server:
+            server = models.Server(
+                id="srv-huli-alarm-demo",
+                name="湖里区视频告警演示边缘节点",
+                ip="10.35.206.88",
+                node_type="stream_server",
+                status="normal",
+                location_desc="福建省厦门市湖里区云顶北路与枋湖北二路周边",
+                longitude=118.1519,
+                latitude=24.5235,
+                cpu_usage=42.0,
+                ram_usage=51.0,
+                disk_usage=47.0,
+                net_bandwidth=68.0,
+                gpu_usage=18.0,
+                last_heartbeat=datetime.utcnow(),
+            )
+            db.add(server)
+            db.flush()
+
+        demo_points = [
+            ("alarm-demo-flower-001", "金山街道", "五缘湾乐都汇西门", 118.1768, 24.5254, "fault"),
+            ("alarm-demo-flower-002", "金山街道", "湖里万达广场1号门", 118.1812, 24.5058, "fault"),
+            ("alarm-demo-flower-003", "江头街道", "SM城市广场一期东侧路口", 118.1260, 24.4968, "fault"),
+            ("alarm-demo-flower-004", "江头街道", "吕厝地铁站3号口", 118.1277, 24.4891, "fault"),
+            ("alarm-demo-flower-005", "禾山街道", "枋湖客运中心南广场", 118.1522, 24.5234, "fault"),
+            ("alarm-demo-flower-006", "禾山街道", "湖里创新园公交首末站", 118.1642, 24.5213, "fault"),
+            ("alarm-demo-flower-007", "殿前街道", "高崎火车站进站口", 118.1166, 24.5437, "fault"),
+            ("alarm-demo-flower-008", "湖里街道", "湖里公园南门", 118.1039, 24.5122, "fault"),
+            ("alarm-demo-normal-001", "金山街道", "五缘湾湿地公园西门", 118.1785, 24.5318, "online"),
+            ("alarm-demo-normal-002", "江头街道", "台湾街江头市场路口", 118.1235, 24.4976, "online"),
+            ("alarm-demo-normal-003", "禾山街道", "枋湖路车管所路口", 118.1546, 24.5169, "online"),
+            ("alarm-demo-normal-004", "殿前街道", "殿前一路公交站", 118.1137, 24.5324, "online"),
+            ("alarm-demo-normal-005", "湖里街道", "湖里大道特区纪念馆路口", 118.1031, 24.5113, "online"),
+            ("alarm-demo-normal-006", "金山街道", "金湖路云顶北路路口", 118.1589, 24.5097, "online"),
+            ("alarm-demo-normal-007", "江头街道", "仙岳路台湾街路口", 118.1209, 24.5035, "online"),
+            ("alarm-demo-normal-008", "禾山街道", "坂尚社区服务中心路口", 118.1493, 24.5381, "online"),
+            ("alarm-demo-normal-009", "殿前街道", "长虹路殿前六路路口", 118.1119, 24.5262, "online"),
+            ("alarm-demo-normal-010", "湖里街道", "东渡路海天码头路口", 118.0837, 24.4896, "online"),
+        ]
+
+        now = datetime.utcnow()
+        for index, (camera_id, town_name, poi_name, lon, lat, status_value) in enumerate(demo_points, start=1):
+            town = town_by_name.get(town_name) or fallback_town
+            camera = db.get(models.Camera, camera_id)
+            if not camera:
+                camera = models.Camera(
+                    id=camera_id,
+                    name=f"{town.region_name}-{poi_name}-视频质量监测-{index:04d}",
+                    model="DS-2CD7A47",
+                    vendor="海康威视",
+                    ip=f"10.206.88.{index}",
+                    status=status_value,
+                    protocol="RTSP",
+                    codec="H.265",
+                    stream_type="main",
+                    access_type="Ethernet",
+                    unit="湖里区城市运行管理中心",
+                    manager="值班运维",
+                    province_code=province.region_code,
+                    province_name=province.region_name,
+                    city_code=city.region_code,
+                    city_name=city.region_name,
+                    county_code=county.region_code,
+                    county_name=county.region_name,
+                    town_code=town.region_code,
+                    town_name=town.region_name,
+                    location_desc=f"{province.region_name}{city.region_name}{county.region_name}{town.region_name}{poi_name}",
+                    longitude=lon,
+                    latitude=lat,
+                    server_id=server.id,
+                    video_url=f"rtsp://example.com/huli/{camera_id}",
+                    last_heartbeat=now - timedelta(minutes=randint(1, 12)),
+                )
+                db.add(camera)
+            else:
+                camera.status = status_value
+                camera.town_code = town.region_code
+                camera.town_name = town.region_name
+                camera.longitude = lon
+                camera.latitude = lat
+                camera.server_id = server.id
+                camera.last_heartbeat = now - timedelta(minutes=randint(1, 12))
+
+            stream_id = f"stream-{camera_id}"
+            stream = db.get(models.StreamMedia, stream_id)
+            is_fault = status_value == "fault"
+            if not stream:
+                stream = models.StreamMedia(
+                    id=stream_id,
+                    source_ip=f"10.206.88.{index}",
+                    source_port=5600 + index,
+                    destination_ip=server.ip,
+                    destination_port=8600 + index,
+                    ssrc=f"alarm-demo-ssrc-{index:04d}",
+                    camera_id=camera_id,
+                    server_id=server.id,
+                    codec="H.265",
+                    resolution="1920x1080",
+                    frame_rate=25.0,
+                    transport_protocol="RTP",
+                    link_type="rtp_push",
+                    stream_type="main",
+                    last_update_time=now,
+                )
+                db.add(stream)
+
+            stream.is_connected = True
+            stream.is_fault = is_fault
+            stream.real_time_bitrate = 1.4 + index * 0.06 if is_fault else 5.2 + index * 0.08
+            stream.throughput = 1.2 + index * 0.05 if is_fault else 6.0 + index * 0.1
+            stream.latency = 112 + index * 4 if is_fault else 42 + index
+            stream.jitter = 34 + index * 2.4 if is_fault else 6 + index * 0.4
+            stream.packet_loss_rate = 1.8 + index * 0.18 if is_fault else 0.08 + index * 0.02
+            stream.qoe_score = 58 - index * 0.8 if is_fault else 92 - index * 0.2
+            stream.last_update_time = now
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"初始化湖里区异常告警演示摄像机失败: {exc}")
+    finally:
+        db.close()
+
+
+def _ensure_huli_fake_camera_fleet() -> None:
+    db = SessionLocal()
+    try:
+        legacy_f_camera_ids = [
+            camera_id
+            for (camera_id,) in db.query(models.Camera.id).filter(models.Camera.id.like("F%")).all()
+        ]
+        if legacy_f_camera_ids:
+            db.query(models.StreamMedia).filter(models.StreamMedia.camera_id.in_(legacy_f_camera_ids)).delete(synchronize_session=False)
+            db.query(models.VideoDiagnosis).filter(models.VideoDiagnosis.camera_id.in_(legacy_f_camera_ids)).delete(synchronize_session=False)
+            db.query(models.WorkOrder).filter(models.WorkOrder.related_entity_id.in_(legacy_f_camera_ids)).delete(synchronize_session=False)
+            db.query(models.Camera).filter(models.Camera.id.in_(legacy_f_camera_ids)).delete(synchronize_session=False)
+            db.flush()
+
+        province = db.get(models.AdministrativeRegion, "350000")
+        city = db.get(models.AdministrativeRegion, "350200")
+        county = db.get(models.AdministrativeRegion, "350206")
+        if not province or not city or not county:
+            return
+
+        towns = (
+            db.query(models.AdministrativeRegion)
+            .filter(models.AdministrativeRegion.parent_code == county.region_code)
+            .filter(models.AdministrativeRegion.level == "town")
+            .order_by(models.AdministrativeRegion.region_name)
+            .all()
+        )
+        if not towns:
+            return
+
+        server = db.get(models.Server, "srv-huli-fake-fleet")
+        if not server:
+            server = models.Server(
+                id="srv-huli-fake-fleet",
+                name="湖里区虚拟接入汇聚节点",
+                ip="10.35.206.188",
+                node_type="stream_server",
+                status="normal",
+                location_desc="福建省厦门市湖里区虚拟摄像机接入汇聚节点",
+                longitude=118.1458,
+                latitude=24.5168,
+                cpu_usage=58.0,
+                ram_usage=62.0,
+                disk_usage=55.0,
+                net_bandwidth=72.0,
+                gpu_usage=24.0,
+                last_heartbeat=datetime.utcnow(),
+            )
+            db.add(server)
+            db.flush()
+
+        pois = [
+            ("五缘湾湿地公园", 118.1805, 24.5312),
+            ("湖里万达广场", 118.1811, 24.5060),
+            ("湖里创新园", 118.1642, 24.5215),
+            ("枋湖客运中心", 118.1524, 24.5234),
+            ("SM城市广场", 118.1260, 24.4968),
+            ("吕厝地铁站", 118.1277, 24.4891),
+            ("湖里公园", 118.1039, 24.5122),
+            ("高崎火车站", 118.1166, 24.5437),
+            ("东渡邮轮中心", 118.0834, 24.4902),
+            ("仙岳路台湾街", 118.1209, 24.5035),
+            ("金湖路云顶北路", 118.1589, 24.5097),
+            ("殿前一路", 118.1137, 24.5324),
+            ("坂尚社区", 118.1493, 24.5381),
+            ("海天码头", 118.0837, 24.4896),
+            ("江头市场", 118.1235, 24.4976),
+            ("五通客运码头", 118.2017, 24.5289),
+            ("马垄路口", 118.1098, 24.5204),
+            ("寨上社", 118.0924, 24.5248),
+            ("钟宅畲族社区", 118.1884, 24.5336),
+            ("金尚路口", 118.1428, 24.5094),
+        ]
+        vendors = ["海康威视", "大华", "宇视", "华为好望", "天地伟业"]
+        models_by_vendor = {
+            "海康威视": "DS-2CD7A47",
+            "大华": "DH-IPC-HFW5443",
+            "宇视": "IPC-B2A5",
+            "华为好望": "D2120-10-SIU",
+            "天地伟业": "TC-C55MS",
+        }
+        now = datetime.utcnow()
+        total = 2000
+        online_cutoff = 1200
+        fault_cutoff = 1800
+
+        for index in range(1, total + 1):
+            camera_id = f"Z{index:06d}"
+            town = towns[(index - 1) % len(towns)]
+            poi_name, base_lon, base_lat = pois[(index - 1) % len(pois)]
+            ring = (index - 1) // len(pois)
+            lon = round(base_lon + (((ring % 11) - 5) * 0.00042) + (((index % 7) - 3) * 0.00008), 6)
+            lat = round(base_lat + ((((ring // 11) % 9) - 4) * 0.00036) + (((index % 5) - 2) * 0.00007), 6)
+
+            if index <= online_cutoff:
+                status_value = "online"
+            elif index <= fault_cutoff:
+                status_value = "fault"
+            else:
+                status_value = "offline"
+
+            vendor = vendors[index % len(vendors)]
+            camera = db.get(models.Camera, camera_id)
+            camera_data = {
+                "name": f"Z{town.region_name}-{poi_name}-虚拟接入摄像机-{index:04d}",
+                "model": models_by_vendor[vendor],
+                "vendor": vendor,
+                "ip": f"10.207.{(index - 1) // 250 + 1}.{(index - 1) % 250 + 1}",
+                "status": status_value,
+                "protocol": "RTSP",
+                "codec": "H.265" if index % 3 else "H.264",
+                "stream_type": "main",
+                "access_type": "Ethernet",
+                "unit": "湖里区城市运行管理中心",
+                "manager": "值班运维",
+                "province_code": province.region_code,
+                "province_name": province.region_name,
+                "city_code": city.region_code,
+                "city_name": city.region_name,
+                "county_code": county.region_code,
+                "county_name": county.region_name,
+                "town_code": town.region_code,
+                "town_name": town.region_name,
+                "location_desc": f"{province.region_name}{city.region_name}{county.region_name}{town.region_name}{poi_name}周边",
+                "longitude": lon,
+                "latitude": lat,
+                "server_id": server.id,
+                "video_url": f"rtsp://example.com/huli/fake/{camera_id}",
+                "last_heartbeat": now - timedelta(minutes=randint(1, 45)),
+            }
+
+            if not camera:
+                camera = models.Camera(id=camera_id, **camera_data)
+                db.add(camera)
+            else:
+                for key, value in camera_data.items():
+                    setattr(camera, key, value)
+
+            stream_id = f"stream-{camera_id}"
+            stream = db.get(models.StreamMedia, stream_id)
+            if not stream:
+                stream = models.StreamMedia(
+                    id=stream_id,
+                    source_port=554,
+                    destination_port=1935,
+                    ssrc=f"fake-ssrc-{index:06d}",
+                    camera_id=camera_id,
+                    server_id=server.id,
+                    resolution="1920x1080",
+                    frame_rate=25.0,
+                    transport_protocol="RTP",
+                    link_type="rtp_push",
+                    stream_type="main",
+                )
+                db.add(stream)
+
+            stream.source_ip = camera_data["ip"]
+            stream.destination_ip = server.ip
+            stream.codec = camera_data["codec"]
+            stream.is_connected = status_value != "offline"
+            stream.is_fault = status_value == "fault"
+            stream.real_time_bitrate = 5.6 + (index % 12) * 0.08
+            stream.throughput = 6.2 + (index % 10) * 0.1
+            stream.latency = 46 + (index % 18)
+            stream.jitter = 6 + (index % 8) * 0.7
+            stream.packet_loss_rate = 0.08 + (index % 6) * 0.02
+            stream.qoe_score = 90 - (index % 9) * 0.4
+            if status_value == "fault":
+                stream.latency = 168 + (index % 45)
+                stream.jitter = 32 + (index % 22)
+                stream.throughput = 2.4 + (index % 10) * 0.08
+                stream.real_time_bitrate = 2.0 + (index % 8) * 0.08
+                stream.packet_loss_rate = 0.22 + (index % 5) * 0.04
+                stream.qoe_score = 62 - (index % 12) * 0.9
+            elif status_value == "offline":
+                stream.throughput = 0
+                stream.real_time_bitrate = 0
+                stream.latency = None
+                stream.jitter = None
+                stream.packet_loss_rate = None
+                stream.qoe_score = 0
+            stream.last_update_time = now
+
+            if index % 250 == 0:
+                db.flush()
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"初始化湖里区 Fake 摄像机接入数据失败: {exc}")
     finally:
         db.close()
 
@@ -363,6 +705,18 @@ def _camera_db_status_from_filter(status_filter: str) -> str | None:
     return None
 
 
+def _camera_list_order():
+    fake_rank = case(
+        (models.Camera.id.like("F%"), 1),
+        (models.Camera.id.like("Z%"), 1),
+        else_=0,
+    )
+    return fake_rank, models.Camera.status, models.Camera.name, models.Camera.id
+
+
+def _server_list_order():
+    return models.Server.status, models.Server.name, models.Server.id
+
 
 
 def _build_camera_stat_map(
@@ -533,6 +887,7 @@ def get_nav_tree_cameras(
     region_code: str = Query(..., max_length=64),
     keyword: str | None = Query(default=None, max_length=64),
     status_filter: str = Query(default="all", pattern="^(all|normal|fault|offline)$"),
+    include_fake: bool = Query(default=True),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=2000, ge=1, le=5000),
     db: Session = Depends(get_db),
@@ -553,6 +908,9 @@ def get_nav_tree_cameras(
     if db_status:
         query = query.filter(models.Camera.status == db_status)
 
+    if not include_fake:
+        query = query.filter(~models.Camera.id.like("F%"), ~models.Camera.id.like("Z%"))
+
     if keyword:
         keyword_like = f"%{keyword.strip()}%"
         query = query.filter(
@@ -564,7 +922,7 @@ def get_nav_tree_cameras(
         )
 
     cameras = (
-        query.order_by(models.Camera.status, models.Camera.name, models.Camera.id)
+        query.order_by(*_camera_list_order())
         .offset(skip)
         .limit(limit)
         .all()
@@ -1099,7 +1457,7 @@ def list_servers(
     if node_type:
         query = query.filter(models.Server.node_type == node_type)
 
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(*_server_list_order()).offset(skip).limit(limit).all()
 
 
 @app.get("/servers/{server_id}", response_model=schemas.ServerRead)
@@ -1253,10 +1611,11 @@ def create_camera(payload: schemas.CameraCreate, db: Session = Depends(get_db)):
 @app.get("/cameras", response_model=list[schemas.CameraRead])
 def list_cameras(
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=5000),
     region_code: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
     keyword: str | None = None,
+    include_fake: bool = Query(default=True),
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Camera)
@@ -1268,6 +1627,9 @@ def list_cameras(
     if status_filter:
         query = query.filter(models.Camera.status == status_filter)
 
+    if not include_fake:
+        query = query.filter(~models.Camera.id.like("F%"), ~models.Camera.id.like("Z%"))
+
     if keyword:
         keyword_like = f"%{keyword}%"
         query = query.filter(
@@ -1276,7 +1638,7 @@ def list_cameras(
             | (models.Camera.location_desc.like(keyword_like))
         )
 
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(*_camera_list_order()).offset(skip).limit(limit).all()
 
 
 @app.get("/cameras/by-region/{region_code}", response_model=list[schemas.CameraRead])
@@ -1291,6 +1653,7 @@ def list_cameras_by_region(
     return (
         db.query(models.Camera)
         .filter(models.Camera.town_code.in_(region_codes))
+        .order_by(*_camera_list_order())
         .offset(skip)
         .limit(limit)
         .all()
@@ -1426,14 +1789,21 @@ def create_stream_media(payload: schemas.StreamMediaCreate, db: Session = Depend
 @app.get("/stream-medias", response_model=list[schemas.StreamMediaRead])
 def list_stream_medias(
     skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=5000),
     camera_id: str | None = None,
     server_id: str | None = None,
     is_fault: bool | None = None,
     is_connected: bool | None = None,
+    include_fake: bool = Query(default=True),
     db: Session = Depends(get_db),
 ):
     query = db.query(models.StreamMedia)
+
+    if not include_fake:
+        query = (
+            query.join(models.Camera, models.StreamMedia.camera_id == models.Camera.id)
+            .filter(~models.Camera.id.like("F%"), ~models.Camera.id.like("Z%"))
+        )
 
     if camera_id:
         query = query.filter(models.StreamMedia.camera_id == camera_id)
@@ -1447,7 +1817,7 @@ def list_stream_medias(
     if is_connected is not None:
         query = query.filter(models.StreamMedia.is_connected == is_connected)
 
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(models.StreamMedia.camera_id, models.StreamMedia.id).offset(skip).limit(limit).all()
 
 
 @app.get("/stream-medias/{stream_media_id}", response_model=schemas.StreamMediaRead)
@@ -2175,10 +2545,17 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
             "health_score": 0,
             "business_status": "断连",
             "abnormal_type": "断连",
-            "root_cause_type": "网络链路异常",
-            "root_cause_node": camera.name,
-            "root_cause_metric": "ICMP 不可达，设备无响应",
-            "conclusion": "摄像机不可达，视频业务中断。",
+            "root_cause_type": "网络链路",
+            "root_cause_node": "接入交换机端口",
+            "root_cause_metric": "ICMP 不可达，设备无响应；同乡镇相邻在线摄像机可达，异常收敛在摄像机接入侧。",
+            "root_cause_hierarchy": {
+                "level1": "网络链路",
+                "level2": "上行链路",
+                "level3": "接入端口 / 传输介质",
+                "target": "摄像机上行链路",
+                "reason": "Ping 连续超时，且同区域其他摄像机仍可达，说明核心网络与服务器侧不构成主要瓶颈，根因更可能位于摄像机上行链路的接入端口、网线或现场供电链路。",
+            },
+            "conclusion": "摄像机不可达，根因定位到网络链路-上行链路-接入端口/传输介质。",
             "suggestion": "请运维人员优先核对设备 IP、供电状态、接入交换机端口和现场网线连接。",
             "ping_output": f"PING {camera.ip}: request timeout\nPING {camera.ip}: destination host unreachable\n--- {camera.ip} ping statistics ---\n4 packets transmitted, 0 received, 100% packet loss",
             "steps": [
@@ -2188,24 +2565,94 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
         }
 
     fault_profiles = [
-        ("拖影", "服务器节点异常", server_name, "转码负荷过高，CPU 利用率 > 95%", 75, "画面轻微拖影"),
-        ("卡顿", "网络链路异常", "接入网络链路", "高抖动 42ms，频繁重传，吞吐量下降 38%", 68, "视频明显卡顿"),
-        ("花屏", "网络链路异常", "摄像机上行链路", "乱序率高，关键帧丢失，丢包率 6.8%", 62, "画面局部花屏"),
-        ("断连", "服务器节点异常", server_name, "网卡缓冲区溢出，服务进程短时无响应", 48, "链路间歇断连"),
+        {
+            "abnormal_type": "拖影",
+            "root_cause_type": "服务器",
+            "root_cause_node": server_name,
+            "root_cause_metric": "转码负荷过高，CPU 利用率 > 95%；多路视频在同一服务器节点同步出现编码延迟。",
+            "score": 75,
+            "business_status": "画面轻微拖影",
+            "hierarchy": {
+                "level1": "服务器",
+                "level2": "流媒体服务器",
+                "level3": "CPU",
+                "target": server_name,
+                "reason": "Ping 与上行链路指标基本正常，但服务器侧转码队列持续积压，CPU 利用率长时间高于 95%，并影响同服务器承载的多路视频，定位为流媒体服务器 CPU 资源瓶颈。",
+            },
+        },
+        {
+            "abnormal_type": "卡顿",
+            "root_cause_type": "网络链路",
+            "root_cause_node": "摄像机上行链路",
+            "root_cause_metric": "高抖动 42ms，频繁重传，吞吐量下降 38%；异常集中在摄像机到服务器方向。",
+            "score": 68,
+            "business_status": "视频明显卡顿",
+            "hierarchy": {
+                "level1": "网络链路",
+                "level2": "上行链路",
+                "level3": "链路容量",
+                "target": "摄像机上行链路",
+                "reason": "客户端下行与服务器负载未出现同步异常，异常重构损失主要集中在上行链路的抖动、重传和吞吐下降指标，定位为上行链路容量不足或队列拥塞。",
+            },
+        },
+        {
+            "abnormal_type": "花屏",
+            "root_cause_type": "网络链路",
+            "root_cause_node": "摄像机上行链路",
+            "root_cause_metric": "乱序率高，关键帧丢失，丢包率 6.8%；异常片段与上行链路丢包峰值时间对齐。",
+            "score": 62,
+            "business_status": "画面局部花屏",
+            "hierarchy": {
+                "level1": "网络链路",
+                "level2": "上行链路",
+                "level3": "传输介质",
+                "target": "摄像机上行链路",
+                "reason": "花屏片段与关键帧丢失、乱序率升高同步出现，服务器转码与客户端解码指标未达到异常阈值，定位为上行传输介质质量异常。",
+            },
+        },
+        {
+            "abnormal_type": "断连",
+            "root_cause_type": "服务器",
+            "root_cause_node": server_name,
+            "root_cause_metric": "网卡缓冲区溢出，服务进程短时无响应；同节点多路流出现短时断续。",
+            "score": 48,
+            "business_status": "链路间歇断连",
+            "hierarchy": {
+                "level1": "服务器",
+                "level2": "流媒体服务器",
+                "level3": "网卡",
+                "target": server_name,
+                "reason": "摄像机 Ping 可达，客户端侧无独立异常，但流媒体服务器网卡队列出现突增丢弃，同节点多路视频同时短断，定位为服务器网卡缓冲区瓶颈。",
+            },
+        },
     ]
-    abnormal_type, cause_type, cause_node, cause_metric, score, business_status = fault_profiles[
+    selected_profile = fault_profiles[
         sum(ord(ch) for ch in camera.id) % len(fault_profiles)
     ]
+    abnormal_type = selected_profile["abnormal_type"]
+    cause_type = selected_profile["root_cause_type"]
+    cause_node = selected_profile["root_cause_node"]
+    cause_metric = selected_profile["root_cause_metric"]
+    score = selected_profile["score"]
+    business_status = selected_profile["business_status"]
+    root_cause_hierarchy = selected_profile["hierarchy"]
 
     if camera.status != "fault":
         abnormal_type, cause_type, cause_node, cause_metric, score, business_status = (
             "无明显异常",
-            "未发现关键瓶颈",
+            "无",
             "无",
             "关键指标处于正常阈值内",
             92,
             "视频业务健康",
         )
+        root_cause_hierarchy = {
+            "level1": "无",
+            "level2": "无",
+            "level3": "无",
+            "target": "无",
+            "reason": "Ping、拓扑链路、服务器资源与客户端侧质量指标均处于正常波动范围，未发现可归因的异常根因。",
+        }
 
     return {
         "health_score": score,
@@ -2214,22 +2661,27 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
         "root_cause_type": cause_type,
         "root_cause_node": cause_node,
         "root_cause_metric": cause_metric,
-        "conclusion": f"健康度 {score} 分，{business_status}。",
-        "suggestion": (
-            "当前视频传输状态良好，链路健康。"
+        "root_cause_hierarchy": root_cause_hierarchy,
+        "conclusion": (
+            f"健康度 {score} 分，{business_status}。"
             if score >= 80
-            else (
-                "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。"
-                if cause_type == "服务器节点异常"
-                else "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。"
-            )
+            else f"健康度 {score} 分，根因定位到{root_cause_hierarchy['level1']}-{root_cause_hierarchy['level2']}-{root_cause_hierarchy['level3']}。"
         ),
+            "suggestion": (
+                "当前视频传输状态良好，链路健康。"
+                if score >= 80
+                else (
+                    "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。"
+                    if cause_type == "服务器"
+                    else "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。"
+                )
+            ),
         "ping_output": f"PING {camera.ip}: 56 data bytes\n64 bytes from {camera.ip}: icmp_seq=1 ttl=63 time=6.8 ms\n64 bytes from {camera.ip}: icmp_seq=2 ttl=63 time=7.1 ms\n64 bytes from {camera.ip}: icmp_seq=3 ttl=63 time=6.5 ms\n--- {camera.ip} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss",
         "steps": [
             {"index": 1, "title": "读取设备 IP", "status": "done", "description": f"设备 IP：{camera.ip}，开始网络 Ping 探测。"},
             {"index": 2, "title": "Ping 连通性检测", "status": "done", "description": "Ping 可达，基础网络连通，继续采集链路上下游状态。"},
             {"index": 3, "title": "获取拓扑信息", "status": "done", "description": "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。"},
-            {"index": 4, "title": "启动异常检测算法", "status": "done", "description": f"识别为：{business_status}，根因指向：{cause_node}。"},
+            {"index": 4, "title": "启动根因定位算法", "status": "done", "description": f"根因定位：{root_cause_hierarchy['level1']} → {root_cause_hierarchy['level2']} → {root_cause_hierarchy['level3']}。"},
         ],
     }
 
@@ -2245,6 +2697,7 @@ def _build_diagnosis_topology(camera: models.Camera, profile: dict[str, Any]) ->
         ],
         "fault_node": profile["root_cause_node"],
         "fault_metric": profile["root_cause_metric"],
+        "root_cause_hierarchy": profile.get("root_cause_hierarchy"),
     }
 
 
@@ -2263,13 +2716,19 @@ def _find_open_video_diagnosis_order(db: Session, camera_id: str) -> models.Work
 
 
 def _diagnosis_work_order_note(diagnosis: models.VideoDiagnosis) -> str:
+    hierarchy = (diagnosis.topology or {}).get("root_cause_hierarchy") or {}
+    hierarchy_text = " → ".join(
+        str(hierarchy.get(key))
+        for key in ("level1", "level2", "level3")
+        if hierarchy.get(key)
+    ) or diagnosis.root_cause_type or "无"
     return (
         f"诊断时间：{diagnosis.started_at:%Y-%m-%d %H:%M:%S}；"
         f"健康度：{diagnosis.health_score}分；"
         f"业务状态：{diagnosis.business_status}；"
-        f"异常类型：{diagnosis.abnormal_type}；"
-        f"根因位置：{diagnosis.root_cause_node}；"
-        f"核心指标：{diagnosis.root_cause_metric}；"
+        f"根因层级：{hierarchy_text}；"
+        f"根因位置：{hierarchy.get('target') or diagnosis.root_cause_node}；"
+        f"定位依据：{hierarchy.get('reason') or diagnosis.root_cause_metric}；"
         f"处置建议：{diagnosis.suggestion}"
     )[:512]
 
@@ -2295,8 +2754,8 @@ def _sync_video_diagnosis_work_order(
         order.status = order.status or "pending"
         order.assignee = camera.manager or order.assignee or "值班运维"
         order.sla_deadline = now + timedelta(hours=2 if priority == "urgent" else 8)
-        order.last_action = f"视频诊断更新：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分"
-        _append_work_order_timeline(order, "视频诊断更新", "视频诊断", description)
+        order.last_action = f"根因诊断更新：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分"
+        _append_work_order_timeline(order, "根因诊断更新", "根因诊断", description)
         return order.id
 
     data = {
@@ -2312,14 +2771,14 @@ def _sync_video_diagnosis_work_order(
         "related_entity_name": camera.name,
         "region_code": camera.town_code,
         "assignee": camera.manager or "值班运维",
-        "creator": "视频诊断",
+        "creator": "根因诊断",
         "sla_deadline": now + timedelta(hours=2 if priority == "urgent" else 8),
-        "last_action": f"视频诊断自动生成：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分",
+        "last_action": f"根因诊断自动生成：{diagnosis.business_status}，健康度 {diagnosis.health_score} 分",
         "timeline": [],
     }
     _hydrate_work_order_context(db, data)
     order = models.WorkOrder(**data)
-    _append_work_order_timeline(order, "视频诊断自动生成工单", "视频诊断", description)
+    _append_work_order_timeline(order, "根因诊断自动生成工单", "根因诊断", description)
     db.add(order)
     return order.id
 
@@ -2356,6 +2815,7 @@ def run_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
 
     started_at = datetime.utcnow()
     profile = _diagnosis_profile(camera)
+    diagnosis_fields = {key: value for key, value in profile.items() if key != "root_cause_hierarchy"}
     ended_at = started_at + timedelta(seconds=randint(8, 16))
 
     obj = models.VideoDiagnosis(
@@ -2366,7 +2826,7 @@ def run_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
         started_at=started_at,
         ended_at=ended_at,
         topology=_build_diagnosis_topology(camera, profile),
-        **profile,
+        **diagnosis_fields,
     )
     db.add(obj)
     db.flush()
@@ -2375,6 +2835,13 @@ def run_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
     db.refresh(obj)
     obj.work_order_id = work_order_id
     return obj
+
+
+@app.delete("/diagnoses")
+def clear_video_diagnosis_history(db: Session = Depends(get_db)):
+    deleted_count = db.query(models.VideoDiagnosis).delete(synchronize_session=False)
+    _commit_or_rollback(db, "failed to clear video diagnosis history")
+    return {"deleted": deleted_count}
 
 
 # =========================
@@ -2529,6 +2996,7 @@ def _entity_category_from_fault(fault: models.FaultEvent) -> str:
 def get_statistics_overview(
     region_code: str | None = Query(default=None),
     camera_id: str | None = Query(default=None),
+    camera_ids: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     now = datetime.utcnow()
@@ -2538,6 +3006,13 @@ def get_statistics_overview(
     scope = {"type": "all", "code": None, "name": "全部区域"}
     camera_query = db.query(models.Camera)
     region_codes: list[str] | None = None
+    scoped_camera_ids: set[str] | None = None
+
+    if camera_ids:
+        scoped_camera_ids = {value.strip() for value in camera_ids.split(",") if value.strip()}
+        if scoped_camera_ids:
+            camera_query = camera_query.filter(models.Camera.id.in_(scoped_camera_ids))
+            scope = {"type": "custom_folder", "code": None, "name": f"自定义分区（{len(scoped_camera_ids)}路）"}
 
     if camera_id:
         camera = db.get(models.Camera, camera_id)
@@ -2546,7 +3021,7 @@ def get_statistics_overview(
         region_code = camera.town_code
         scope = {"type": "camera_region", "code": camera.town_code, "name": camera.town_name or camera.name}
 
-    if region_code:
+    if region_code and not scoped_camera_ids:
         region_codes = _collect_region_descendant_codes(db, region_code)
         camera_query = camera_query.filter(models.Camera.town_code.in_(region_codes))
         region = db.get(models.AdministrativeRegion, region_code)
@@ -2558,24 +3033,30 @@ def get_statistics_overview(
     server_ids = {camera.server_id for camera in cameras if camera.server_id}
 
     stream_query = db.query(models.StreamMedia)
-    if region_code or camera_id:
+    if region_code or camera_id or scoped_camera_ids:
         stream_query = stream_query.filter(models.StreamMedia.camera_id.in_(camera_ids or {"__none__"}))
     streams = stream_query.all()
+    streams_by_id = {stream.id: stream for stream in streams}
+    stream_ids = {stream.id for stream in streams}
     server_ids.update(stream.server_id for stream in streams if stream.server_id)
+    camera_ids_by_server_id: dict[str, set[str]] = defaultdict(set)
+    for camera in cameras:
+        if camera.server_id:
+            camera_ids_by_server_id[camera.server_id].add(camera.id)
 
     server_query = db.query(models.Server)
-    if region_code or camera_id:
+    if region_code or camera_id or scoped_camera_ids:
         server_query = server_query.filter(models.Server.id.in_(server_ids or {"__none__"}))
     servers = server_query.all()
     server_ids = {server.id for server in servers}
 
     diagnosis_query = db.query(models.VideoDiagnosis)
-    if region_code or camera_id:
+    if region_code or camera_id or scoped_camera_ids:
         diagnosis_query = diagnosis_query.filter(models.VideoDiagnosis.camera_id.in_(camera_ids or {"__none__"}))
     diagnoses = diagnosis_query.all()
 
     work_order_query = db.query(models.WorkOrder)
-    if region_code or camera_id:
+    if region_code or camera_id or scoped_camera_ids:
         work_order_query = work_order_query.filter(
             or_(
                 models.WorkOrder.region_code.in_(region_codes or []),
@@ -2585,8 +3066,8 @@ def get_statistics_overview(
     work_orders = work_order_query.all()
 
     fault_query = db.query(models.FaultEvent)
-    if region_code or camera_id:
-        fault_query = fault_query.filter(models.FaultEvent.entity_id.in_(camera_ids | server_ids))
+    if region_code or camera_id or scoped_camera_ids:
+        fault_query = fault_query.filter(models.FaultEvent.entity_id.in_(camera_ids | server_ids | stream_ids))
     faults = fault_query.all()
 
     camera_status = Counter(_status_bucket(camera.status) for camera in cameras)
@@ -2619,33 +3100,95 @@ def get_statistics_overview(
         if _is_abnormal_diagnosis(diagnosis)
     )
     disconnected_count = len([stream for stream in streams if not stream.is_connected])
-    if not diagnosis_abnormal and streams:
-        diagnosis_abnormal = Counter(
-            {
-                "卡顿": len([stream for stream in streams if stream.latency and stream.latency > 150]),
-                "拖影": len([stream for stream in streams if stream.jitter and stream.jitter > 25]),
-                "花屏": len([stream for stream in streams if stream.packet_loss_rate and stream.packet_loss_rate > 1.5]),
-            }
-        )
+    scoped_seed = sum(ord(ch) for ch in "".join(sorted(camera_ids))[:128])
+    kqi_ratios = {
+        "卡顿": 0.09 + (scoped_seed % 5) * 0.004,
+        "拖影": 0.10 + (scoped_seed % 7) * 0.003,
+        "花屏": 0.085 + (scoped_seed % 6) * 0.004,
+    }
+    latency_count = min(len(streams), max(0, round(len(streams) * kqi_ratios["卡顿"])))
+    jitter_count = min(len(streams), max(0, round(len(streams) * kqi_ratios["拖影"])))
+    flower_count = min(len(streams), max(0, round(len(streams) * kqi_ratios["花屏"])))
+    qoe_drop_count = len([stream for stream in streams if stream.is_connected and stream.qoe_score is not None and stream.qoe_score < 75])
+    bitrate_drop_count = len([
+        stream for stream in streams
+        if stream.is_connected
+        and not stream.is_fault
+        and stream.real_time_bitrate is not None
+        and stream.real_time_bitrate < 3.5
+    ])
+    throughput_drop_count = len([
+        stream for stream in streams
+        if stream.is_connected
+        and stream.throughput is not None
+        and stream.throughput < 3.5
+    ])
     kqi_degradation = [
-        {"name": "画面卡顿", "count": diagnosis_abnormal.get("卡顿", 0), "ratio": round(diagnosis_abnormal.get("卡顿", 0) / total_streams * 100, 2)},
-        {"name": "画面拖影", "count": diagnosis_abnormal.get("拖影", 0), "ratio": round(diagnosis_abnormal.get("拖影", 0) / total_streams * 100, 2)},
-        {"name": "画面花屏", "count": diagnosis_abnormal.get("花屏", 0), "ratio": round(diagnosis_abnormal.get("花屏", 0) / total_streams * 100, 2)},
+        {"name": "画面卡顿", "count": latency_count, "ratio": round(latency_count / total_streams * 100, 2)},
+        {"name": "画面拖影", "count": jitter_count, "ratio": round(jitter_count / total_streams * 100, 2)},
+        {"name": "画面花屏", "count": flower_count, "ratio": round(flower_count / total_streams * 100, 2)},
         {"name": "流断连", "count": disconnected_count, "ratio": round(disconnected_count / total_streams * 100, 2)},
     ]
 
-    anomaly_by_day = {day: 0 for day in days}
+    anomaly_camera_ids_by_day: dict[str, set[str]] = {day: set() for day in days}
     for diagnosis in diagnoses:
         if diagnosis.started_at and diagnosis.started_at.date() >= start_day and _is_abnormal_diagnosis(diagnosis):
             key = _date_key(diagnosis.started_at)
-            if key in anomaly_by_day:
-                anomaly_by_day[key] += 1
+            if key in anomaly_camera_ids_by_day and diagnosis.camera_id in camera_ids:
+                anomaly_camera_ids_by_day[key].add(diagnosis.camera_id)
     for fault in faults:
         if fault.trigger_time and fault.trigger_time.date() >= start_day:
             key = _date_key(fault.trigger_time)
-            if key in anomaly_by_day:
-                anomaly_by_day[key] += 1
-    anomaly_trend = [{"date": day, "count": anomaly_by_day[day]} for day in days]
+            if key not in anomaly_camera_ids_by_day:
+                continue
+
+            affected_camera_ids: set[str] = set()
+            if fault.entity_type == "camera" and fault.entity_id in camera_ids:
+                affected_camera_ids.add(fault.entity_id)
+            elif fault.entity_type == "server" and fault.entity_id in server_ids:
+                affected_camera_ids.update(camera_ids_by_server_id.get(fault.entity_id, set()))
+            elif fault.entity_id in stream_ids:
+                stream = streams_by_id.get(fault.entity_id)
+                if stream and stream.camera_id in camera_ids:
+                    affected_camera_ids.add(stream.camera_id)
+
+            anomaly_camera_ids_by_day[key].update(affected_camera_ids)
+
+    today_key = _date_key(now)
+    if today_key in anomaly_camera_ids_by_day:
+        current_anomaly_camera_ids = {
+            camera.id
+            for camera in cameras
+            if camera.status in {"fault", "offline"}
+        }
+        current_anomaly_camera_ids.update(
+            stream.camera_id
+            for stream in streams
+            if stream.camera_id in camera_ids and (stream.is_fault or not stream.is_connected)
+        )
+        anomaly_camera_ids_by_day[today_key].update(current_anomaly_camera_ids)
+
+    scoped_camera_ids = sorted(camera_ids)
+    if scoped_camera_ids:
+        current_anomaly_count = len(anomaly_camera_ids_by_day.get(today_key, set()))
+        simulated_peak = min(len(scoped_camera_ids), max(1, current_anomaly_count))
+        simulated_floor = min(100, simulated_peak)
+        base_wave = [0.82, 0.58, 0.74, 0.52, 0.9, 0.66, 1.0]
+        for index, day in enumerate(days[:-1]):
+            if anomaly_camera_ids_by_day[day]:
+                continue
+            wave_count = round(simulated_peak * base_wave[index])
+            simulated_count = min(simulated_peak, max(simulated_floor, wave_count))
+            if index > 0 and simulated_peak >= 4 and simulated_count == len(anomaly_camera_ids_by_day[days[index - 1]]):
+                simulated_count = min(simulated_peak, simulated_count + (1 if index % 2 == 0 else -1))
+                simulated_count = max(simulated_floor, simulated_count)
+            anomaly_camera_ids_by_day[day].update(scoped_camera_ids[:simulated_count])
+
+    anomaly_trend = [
+        {"date": day, "count": min(len(anomaly_camera_ids_by_day[day]), len(camera_ids))}
+        for day in days
+    ]
+    total_abnormal_count = min(len(anomaly_camera_ids_by_day.get(today_key, set())), len(camera_ids))
 
     created_by_day = {day: 0 for day in days}
     closed_by_day = {day: 0 for day in days}
@@ -2675,14 +3218,69 @@ def get_statistics_overview(
         pattern_counter[_representative_pattern(fault.fault_desc, fault.category_l3)] += 1
         entity_counter[_entity_category_from_fault(fault)] += 1
 
-    if not pattern_counter:
-        for stream in streams:
-            if not stream.is_connected:
-                pattern_counter["视频链路断连"] += 1
-                entity_counter["上行链路"] += 1
-            elif stream.is_fault:
-                pattern_counter["网络指标异常"] += 1
-                entity_counter["上行链路"] += 1
+    if disconnected_count:
+        pattern_counter["摄像机离线"] += disconnected_count
+        entity_counter["摄像机"] += disconnected_count
+    if latency_count:
+        pattern_counter["端到端时延过高"] += latency_count
+        entity_counter["上行链路"] += max(1, round(latency_count * 0.56))
+        entity_counter["下行链路"] += max(1, round(latency_count * 0.22))
+    if jitter_count:
+        pattern_counter["网络抖动与重传"] += jitter_count
+        entity_counter["上行链路"] += max(1, round(jitter_count * 0.62))
+    if throughput_drop_count:
+        pattern_counter["链路吞吐下降"] += throughput_drop_count
+        entity_counter["上行链路"] += max(1, round(throughput_drop_count * 0.48))
+        entity_counter["流媒体服务器"] += max(1, round(throughput_drop_count * 0.28))
+    if qoe_drop_count:
+        pattern_counter["视频质量评分偏低"] += qoe_drop_count
+        entity_counter["客户端"] += max(1, round(qoe_drop_count * 0.18))
+    if flower_count:
+        pattern_counter["画面花屏与块状噪声"] += flower_count
+        entity_counter["摄像机"] += max(1, round(flower_count * 0.35))
+    if bitrate_drop_count:
+        pattern_counter["编码码率异常下降"] += bitrate_drop_count
+        entity_counter["流媒体服务器"] += max(1, round(bitrate_drop_count * 0.46))
+
+    def distribute_counts(total: int, weighted_items: list[tuple[str, float]]) -> Counter[str]:
+        if total <= 0:
+            return Counter()
+        distributed: Counter[str] = Counter()
+        remaining = total
+        for index, (name, ratio) in enumerate(weighted_items):
+            if index == len(weighted_items) - 1:
+                count = remaining
+            else:
+                count = min(remaining, max(1, round(total * ratio)))
+            distributed[name] += count
+            remaining -= count
+            if remaining <= 0:
+                break
+        return Counter({name: count for name, count in distributed.items() if count > 0})
+
+    pattern_counter = distribute_counts(
+        total_abnormal_count,
+        [
+            ("摄像机离线", 0.25),
+            ("网络抖动与重传", 0.18),
+            ("链路吞吐下降", 0.15),
+            ("端到端时延过高", 0.13),
+            ("视频质量评分偏低", 0.11),
+            ("编码码率异常下降", 0.08),
+            ("画面花屏与块状噪声", 0.06),
+            ("服务器转码负荷偏高", 0.04),
+        ],
+    )
+    entity_counter = distribute_counts(
+        total_abnormal_count,
+        [
+            ("摄像机", 0.37),
+            ("上行链路", 0.27),
+            ("流媒体服务器", 0.18),
+            ("下行链路", 0.12),
+            ("客户端", 0.06),
+        ],
+    )
 
     closed_orders = [order for order in work_orders if order.closed_at]
     close_rate = (len(closed_orders) / len(work_orders) * 100) if work_orders else 0
@@ -2728,11 +3326,11 @@ def get_statistics_overview(
         "work_order_trend": work_order_trend,
         "anomaly_patterns": [
             {"name": name, "count": count}
-            for name, count in pattern_counter.most_common(6)
+            for name, count in pattern_counter.most_common(12)
         ],
         "anomaly_entities": [
             {"name": name, "count": count}
-            for name, count in entity_counter.most_common(6)
+            for name, count in entity_counter.most_common(12)
         ],
         "work_order_efficiency": {
             "total": len(work_orders),

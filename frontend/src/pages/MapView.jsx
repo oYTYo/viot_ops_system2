@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Camera, Loader2, MapPinned, RadioTower } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, Loader2, MapPinned, RadioTower, Server, TrendingUp, WifiOff } from "lucide-react";
 import {
   getMapCamera,
   getMapRegion,
@@ -7,6 +7,7 @@ import {
   getMapRegionChildren,
 } from "../services/mapApi";
 import { getCameraPreview } from "../services/videoApi";
+import { getStatisticsOverview } from "../services/statisticsApi";
 
 const AMAP_URL = "https://webapi.amap.com/maps?v=2.0";
 const CHINA_CENTER = [104.195397, 35.86166];
@@ -22,6 +23,7 @@ const LEVEL_ZOOM = {
   town: 14,
   camera: 16,
 };
+let cachedMapViewState = null;
 
 function parseCenter(center) {
   if (!center) return null;
@@ -102,7 +104,7 @@ function getCameraMarkerContent(camera, focused = false) {
   `;
 }
 
-function MapCameraPreview({ camera, onClose }) {
+function MapCameraPreview({ camera, onClose, onDetail, onDiagnose }) {
   const [state, setState] = useState("connecting");
   const [preview, setPreview] = useState(null);
   const videoRef = useRef(null);
@@ -152,10 +154,13 @@ function MapCameraPreview({ camera, onClose }) {
   }, [preview, state]);
 
   return (
-    <div className="absolute right-[var(--layout-content-padding)] top-[var(--layout-content-padding)] z-20 w-[min(32rem,38vw)] overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black shadow-[var(--shadow-panel)]">
+    <div className="absolute left-1/2 top-[var(--layout-content-padding)] z-20 w-[calc(100%-var(--layout-content-padding)*3)] -translate-x-1/2 overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black shadow-[var(--shadow-panel)]">
       <div className="flex items-center justify-between bg-black/80 px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-white">
         <span className="truncate">{camera.name || camera.camera_name || getCameraId(camera)}</span>
-        <button type="button" onClick={onClose} className="text-white/70 hover:text-white">×</button>
+        <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
+          <button type="button" onClick={() => onDiagnose?.(camera)} className="text-[var(--color-accent)] hover:underline">根因诊断</button>
+          <button type="button" onClick={onClose} className="text-white/70 hover:text-white">×</button>
+        </div>
       </div>
       <div className="relative aspect-video">
         {state === "playing" && preview?.play_url ? (
@@ -171,12 +176,228 @@ function MapCameraPreview({ camera, onClose }) {
             正在连接摄像机
           </div>
         )}
+        <div className="absolute bottom-[var(--layout-search-padding-y)] right-[var(--layout-search-padding-x)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] bg-black/65 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small">
+          <button type="button" onClick={() => onDetail?.(camera)} className="font-medium text-[var(--color-accent)] hover:underline">详情</button>
+        </div>
       </div>
     </div>
   );
 }
 
-export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
+const statusMeta = {
+  normal: { label: "正常", color: "var(--color-accent)", icon: CheckCircle2 },
+  fault: { label: "异常", color: "var(--color-error-text)", icon: AlertCircle },
+  offline: { label: "离线/断连", color: "var(--color-text-muted)", icon: WifiOff },
+};
+
+function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线" }) {
+  const normal = Number(data?.normal || 0);
+  const fault = Number(data?.fault || 0);
+  const offline = Number(data?.offline || 0);
+  const total = Math.max(Number(data?.total || 0), normal + fault + offline, 0);
+  const safeTotal = Math.max(total, 1);
+  const rows = ["normal", "fault", "offline"].map((key) => ({
+    key,
+    value: key === "normal" ? normal : key === "fault" ? fault : offline,
+    ...statusMeta[key],
+    label: key === "offline" ? offlineLabel : statusMeta[key].label,
+  }));
+
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
+        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+          <Icon size="var(--icon-topbar)" className="shrink-0 text-[var(--color-accent)]" />
+          <span className="truncate text-ui-medium font-bold text-[var(--color-text-main)]">{title}</span>
+        </div>
+        <span className="shrink-0 text-ui-large font-bold text-[var(--color-accent)]">{total}</span>
+      </div>
+      <div className="mt-[var(--layout-content-gap)] grid min-w-0 grid-cols-3 items-center gap-[var(--layout-content-gap)]">
+        {rows.map((row) => {
+          const RowIcon = row.icon;
+          return (
+            <span key={row.key} className="flex min-w-0 items-center justify-center gap-[var(--layout-reset-tooltip-gap)] text-ui-medium text-[var(--color-text-main)]">
+              <RowIcon size="var(--icon-bottom)" style={{ color: row.color }} />
+              <span className="whitespace-nowrap">{row.label}</span>
+              <span className="font-semibold">{row.value}</span>
+            </span>
+          );
+        })}
+      </div>
+      <div className="mt-[var(--layout-search-gap)] flex h-[calc(var(--font-small)*0.48)] overflow-hidden rounded-full bg-[var(--color-page-bg)]">
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="h-full"
+            title={`${row.label}: ${row.value}`}
+            style={{
+              width: `${(row.value / safeTotal) * 100}%`,
+              minWidth: row.value ? "var(--layout-tree-action-padding)" : 0,
+              backgroundColor: row.color,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardSection({ title, children }) {
+  return (
+    <section className="min-w-0">
+      <h2 className="mb-[var(--layout-search-padding-y)] text-ui-large font-bold text-[var(--color-text-main)]">{title}</h2>
+      <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-padding)]">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function LatexFormulaMini() {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)]" title="全局健康度 = 100 - 加权平均异常分数">
+      <span className="shrink-0 whitespace-nowrap">全局健康度 = 100 -</span>
+      <span className="inline-flex shrink-0 flex-col items-center align-middle leading-none">
+        <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)]">Σ 每条链路权重 × 异常分数</span>
+        <span className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-tree-gap)]">Σ 每条链路权重</span>
+      </span>
+    </div>
+  );
+}
+
+function HealthGaugeMini({ value }) {
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  const numeric = Math.max(0, Math.min(Number(value || 0), 100));
+  const dash = circumference * (numeric / 100);
+  const color = numeric >= 85 ? "var(--color-accent)" : numeric >= 65 ? "#f59e0b" : "var(--color-error-text)";
+
+  return (
+    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-[var(--layout-content-gap)]">
+      <div className="relative h-[calc(var(--font-large)*4.2)] w-[calc(var(--font-large)*4.2)] shrink-0 overflow-visible">
+        <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-110 overflow-visible">
+          <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-panel-bg)" strokeWidth="12" />
+          <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
+        </svg>
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="font-mono text-ui-large font-bold leading-none" style={{ color }}>{numeric.toFixed(1)}</div>
+        </div>
+      </div>
+      <LatexFormulaMini />
+    </div>
+  );
+}
+
+function formatWeekdayLabel(value) {
+  const weekdayLabels = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."];
+  const match = String(value || "").match(/^(\d{2})-(\d{2})$/);
+
+  if (!match) return String(value || "");
+
+  const now = new Date();
+  const month = Number(match[1]) - 1;
+  const day = Number(match[2]);
+  let date = new Date(now.getFullYear(), month, day);
+
+  if (date.getTime() - now.getTime() > 24 * 60 * 60 * 1000) {
+    date = new Date(now.getFullYear() - 1, month, day);
+  }
+
+  return weekdayLabels[date.getDay()];
+}
+
+function MiniLineChart({ data = [], maxCount }) {
+  const width = 360;
+  const height = 148;
+  const padLeft = 34;
+  const padRight = 34;
+  const padTop = 36;
+  const padBottom = 24;
+  const normalizedData = data.map((item) => ({
+    ...item,
+    count: Math.min(Number(item.count || 0), Math.max(Number(maxCount || 0), 0) || Number(item.count || 0)),
+  }));
+  const maxValue = Math.max(1, ...normalizedData.map((item) => item.count || 0));
+  const xFor = (index) => padLeft + (index * (width - padLeft - padRight)) / Math.max(data.length - 1, 1);
+  const yFor = (value) => height - padBottom - (value / maxValue) * (height - padTop - padBottom);
+  const points = normalizedData.map((row, index) => `${xFor(index)},${yFor(row.count || 0)}`).join(" ");
+  const area = `${padLeft},${height - padBottom} ${points} ${width - padRight},${height - padBottom}`;
+
+  return (
+    <div className="min-w-0 overflow-hidden text-ui-small">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[calc(var(--font-large)*7)] w-full text-ui-small">
+        <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="var(--color-panel-border)" />
+        <polyline points={area} fill="var(--color-error-text)" opacity="0.16" />
+        <polyline points={points} fill="none" stroke="var(--color-error-text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        {normalizedData.map((row, index) => (
+          <g key={row.date}>
+            <text x={xFor(index)} y={yFor(row.count || 0) - 7} textAnchor="middle" fill="var(--color-error-text)" fontSize="var(--font-small)" fontWeight="700">{row.count || 0}</text>
+            <circle cx={xFor(index)} cy={yFor(row.count || 0)} r="3.5" fill="var(--color-error-text)" />
+            <text x={xFor(index)} y={height - 4} textAnchor="middle" fill="var(--color-text-muted)" fontSize="0.95rem">{formatWeekdayLabel(row.date)}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function OperationMetricsPanel({ focusTarget }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const scopeParams = useMemo(() => {
+    if (!focusTarget) return {};
+    if (focusTarget.nodeType === "camera" && focusTarget.cameraId) return { camera_id: focusTarget.cameraId };
+    if (focusTarget.nodeType === "custom_folder") {
+      const cameraIds = (focusTarget.children || [])
+        .map((camera) => getCameraId(camera))
+        .filter(Boolean);
+      return cameraIds.length ? { camera_ids: cameraIds.join(",") } : {};
+    }
+    if (focusTarget.nodeType !== "camera" && focusTarget.regionCode) return { region_code: focusTarget.regionCode };
+    return {};
+  }, [focusTarget]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getStatisticsOverview(scopeParams)
+      .then((overview) => {
+        if (!cancelled) setData(overview);
+      })
+      .catch((error) => console.error("Failed to load operation metrics:", error))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeParams.camera_id, scopeParams.camera_ids, scopeParams.region_code]);
+
+  const health = Number(data?.golden_metrics?.global_stream_health || 0);
+  const cameraTotal = Number(data?.device_status?.cameras?.total || 0);
+
+  return (
+    <aside className="relative flex min-h-0 flex-col justify-between gap-[var(--layout-content-gap)] overflow-auto rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+      {loading && <Loader2 size="var(--icon-bottom)" className="absolute right-[var(--layout-content-padding)] top-[var(--layout-content-padding)] animate-spin text-[var(--color-accent)]" />}
+      <DashboardSection title="资源状态统计">
+        <div className="flex min-h-[calc(var(--font-large)*13)] flex-col justify-between gap-[var(--layout-content-gap)]">
+          <StatusMetricBar title="摄像机" icon={Camera} data={data?.device_status?.cameras} />
+          <StatusMetricBar title="流链路" icon={TrendingUp} data={data?.device_status?.streams} offlineLabel="断连" />
+          <StatusMetricBar title="服务器" icon={Server} data={data?.device_status?.servers} />
+        </div>
+      </DashboardSection>
+      <DashboardSection title="黄金指标：流链路全局健康度">
+        <HealthGaugeMini value={health} />
+      </DashboardSection>
+      <DashboardSection title="异常告警统计">
+        <MiniLineChart data={data?.anomaly_trend || []} maxCount={cameraTotal} />
+      </DashboardSection>
+    </aside>
+  );
+}
+
+export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onOpenCameraDiagnosis }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const amapRef = useRef(null);
@@ -245,6 +466,16 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
     const AMap = amapRef.current;
     if (!AMap || !mapRef.current || !regionCode) return;
 
+    cachedMapViewState = {
+      mode: "cameras",
+      regionCode,
+      focusedCameraId,
+      center: mapRef.current.getCenter?.()
+        ? [mapRef.current.getCenter().lng, mapRef.current.getCenter().lat]
+        : null,
+      zoom: mapRef.current.getZoom?.() || LEVEL_ZOOM.town,
+    };
+
     const cameras = await getMapRegionCameras(regionCode);
     clearOverlays();
 
@@ -272,6 +503,57 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
 
       addOverlay(marker);
     });
+  }
+
+  async function renderCustomFolderCameras(folder) {
+    const AMap = amapRef.current;
+    if (!AMap || !mapRef.current) return;
+
+    const cameras = (folder.children || []).filter(hasLngLat);
+    focusedCameraIdRef.current = "";
+    cachedMapViewState = {
+      mode: "custom_folder",
+      customFolder: folder,
+      center: mapRef.current.getCenter?.()
+        ? [mapRef.current.getCenter().lng, mapRef.current.getCenter().lat]
+        : null,
+      zoom: mapRef.current.getZoom?.() || LEVEL_ZOOM.town,
+    };
+    clearOverlays();
+
+    const markers = cameras.map((camera) => {
+      const marker = new AMap.Marker({
+        position: [Number(camera.longitude), Number(camera.latitude)],
+        content: getCameraMarkerContent(camera, false),
+        offset: new AMap.Pixel(-20, -20),
+        title: camera.name,
+        zIndex: 150,
+      });
+
+      marker.on("click", () => {
+        setPreviewCamera(camera);
+      });
+
+      marker.on("dblclick", () => {
+        onOpenCameraDetail?.({
+          ...camera,
+          cameraId: getCameraId(camera),
+          cameraName: camera.name,
+        });
+      });
+
+      addOverlay(marker);
+      return marker;
+    });
+
+    if (markers.length > 1) {
+      mapRef.current.setFitView?.(markers, false, [60, 60, 60, 60]);
+    } else if (cameras.length === 1) {
+      mapRef.current.setZoomAndCenter?.(LEVEL_ZOOM.camera, [
+        Number(cameras[0].longitude),
+        Number(cameras[0].latitude),
+      ]);
+    }
   }
 
   async function getRegionForFocus(region) {
@@ -316,8 +598,21 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
     }
 
     if (latestRegion.level === "county" || latestRegion.level === "town") {
+      cachedMapViewState = {
+        mode: "cameras",
+        regionCode: latestRegion.regionCode || latestRegion.region_code,
+        focusedCameraId: "",
+        center: position,
+        zoom: LEVEL_ZOOM[latestRegion.level] || LEVEL_ZOOM.county,
+      };
       await renderCameras(latestRegion.regionCode || latestRegion.region_code);
     } else {
+      cachedMapViewState = {
+        mode: "regions",
+        regionCode: latestRegion.regionCode || latestRegion.region_code || null,
+        center: position,
+        zoom: LEVEL_ZOOM[latestRegion.level] || 8,
+      };
       await renderRegions(latestRegion.regionCode || latestRegion.region_code || null);
     }
   }
@@ -354,6 +649,13 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
 
     if (hasLngLat(targetCamera)) {
       focusedCameraIdRef.current = getCameraId(targetCamera) || cameraId;
+      cachedMapViewState = {
+        mode: "cameras",
+        regionCode: getCameraRegionCode(targetCamera),
+        focusedCameraId: focusedCameraIdRef.current,
+        center: [Number(targetCamera.longitude), Number(targetCamera.latitude)],
+        zoom: LEVEL_ZOOM.camera,
+      };
       map.setZoomAndCenter(LEVEL_ZOOM.camera, [
         Number(targetCamera.longitude),
         Number(targetCamera.latitude),
@@ -373,6 +675,32 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
     }
 
     setMessage("该摄像机缺少经纬度，暂时无法定位到地图。");
+  }
+
+  async function restoreCachedMapView() {
+    const map = mapRef.current;
+    const cached = cachedMapViewState;
+    if (!map || !cached) {
+      await renderRegions(null);
+      return;
+    }
+
+    if (cached.center && cached.zoom) {
+      map.setZoomAndCenter(cached.zoom, cached.center);
+    }
+
+    if (cached.mode === "cameras" && cached.regionCode) {
+      focusedCameraIdRef.current = cached.focusedCameraId || "";
+      await renderCameras(cached.regionCode, cached.focusedCameraId || "");
+      return;
+    }
+
+    if (cached.mode === "custom_folder" && cached.customFolder) {
+      await renderCustomFolderCameras(cached.customFolder);
+      return;
+    }
+
+    await renderRegions(cached.regionCode || null);
   }
 
   useEffect(() => {
@@ -402,7 +730,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
 
         mapRef.current = map;
         setReady(true);
-        await renderRegions(null);
+        await restoreCachedMapView();
       } catch (error) {
         console.error("Map init failed:", error);
         setMessage(error.message || "地图初始化失败");
@@ -439,6 +767,8 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
     const task =
       focusTarget.nodeType === "camera"
         ? focusCamera(focusTarget)
+        : focusTarget.nodeType === "custom_folder"
+        ? renderCustomFolderCameras(focusTarget)
         : focusRegion(focusTarget);
 
     task
@@ -451,10 +781,10 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
   }, [ready, focusKey]);
 
   return (
-    <main className="relative flex min-w-0 flex-1 bg-[var(--color-page-bg)] p-[var(--layout-content-padding)] transition-colors">
+    <main className="grid min-w-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-[var(--layout-content-gap)] bg-[var(--color-page-bg)] p-[var(--layout-content-padding)] transition-colors">
       <section className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
         <div ref={mapContainerRef} className="h-full w-full" />
-        {previewCamera && <MapCameraPreview camera={previewCamera} onClose={() => setPreviewCamera(null)} />}
+        {previewCamera && <MapCameraPreview camera={previewCamera} onClose={() => setPreviewCamera(null)} onDetail={onOpenCameraDetail} onDiagnose={onOpenCameraDiagnosis} />}
 
         <div className="pointer-events-none absolute left-[var(--layout-content-padding)] top-[var(--layout-content-padding)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
           <MapPinned size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
@@ -491,6 +821,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail }) {
           <span>县级显示摄像机</span>
         </div>
       </section>
+      <OperationMetricsPanel focusTarget={focusTarget} />
     </main>
   );
 }

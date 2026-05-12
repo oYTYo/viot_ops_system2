@@ -180,7 +180,7 @@ body,
   --color-surface-hover: #ffffff;
 
   --color-text-main: #24324a;
-  --color-text-muted: #8fa0b8;
+  --color-text-muted: #6f7f95;
   --color-icon-muted: #8fa0b8;
 
   --color-panel-border: rgba(5, 128, 255, 0.55);
@@ -208,7 +208,7 @@ body,
   --color-surface-hover: #1b304d;
 
   --color-text-main: rgba(241, 247, 255, 0.9);
-  --color-text-muted: rgba(204, 216, 232, 0.62);
+  --color-text-muted: rgba(174, 188, 208, 0.78);
   --color-icon-muted: rgba(204, 216, 232, 0.68);
 
   --color-panel-border: rgba(129, 236, 255, 0.42);

@@ -4,8 +4,6 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
-  Clock3,
-  FileCheck2,
   Gauge,
   Loader2,
   RefreshCw,
@@ -31,13 +29,14 @@ function percent(value) {
   return `${formatNumber(value, 1)}%`;
 }
 
-function Panel({ title, subtitle, icon: Icon, children, className = "" }) {
+function Panel({ title, subtitle, icon: Icon, children, action = null, className = "" }) {
   return (
     <section className={`flex min-w-0 flex-col rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)] ${className}`}>
       <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)] border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
         {Icon && <Icon size="var(--icon-topbar)" className="shrink-0 text-[var(--color-accent)]" />}
         <h2 className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">{title}</h2>
         {subtitle && <span className="min-w-0 truncate text-ui-small text-[var(--color-text-muted)]">{subtitle}</span>}
+        {action && <div className="ml-auto shrink-0">{action}</div>}
       </div>
       <div className="min-w-0 flex-1 p-[var(--layout-content-padding)]">{children}</div>
     </section>
@@ -153,14 +152,21 @@ function KqiBar({ items }) {
   );
 }
 
-function LineChart({ data, series }) {
+function LineChart({ data, series, maxCount }) {
   const width = 640;
   const height = 160;
   const padLeft = 38;
   const padRight = 18;
   const padTop = 20;
   const padBottom = 24;
-  const maxValue = Math.max(1, ...data.flatMap((row) => series.map((item) => row[item.key] || 0)));
+  const normalizedData = data.map((row) => {
+    const next = { ...row };
+    series.forEach((item) => {
+      next[item.key] = Math.min(Number(row[item.key] || 0), Math.max(Number(maxCount || 0), 0) || Number(row[item.key] || 0));
+    });
+    return next;
+  });
+  const maxValue = Math.max(1, ...normalizedData.flatMap((row) => series.map((item) => row[item.key] || 0)));
   const xFor = (index) => padLeft + (index * (width - padLeft - padRight)) / Math.max(data.length - 1, 1);
   const yFor = (value) => height - padBottom - (value / maxValue) * (height - padTop - padBottom);
   const ticks = [maxValue, Math.round(maxValue / 2), 0];
@@ -178,13 +184,13 @@ function LineChart({ data, series }) {
         ))}
         <line x1={padLeft} x2={padLeft} y1={padTop} y2={height - padBottom} stroke="var(--color-panel-border)" />
         {series.map((item) => {
-          const points = data.map((row, index) => `${xFor(index)},${yFor(row[item.key] || 0)}`).join(" ");
+          const points = normalizedData.map((row, index) => `${xFor(index)},${yFor(row[item.key] || 0)}`).join(" ");
           const area = `${padLeft},${height - padBottom} ${points} ${width - padRight},${height - padBottom}`;
           return (
             <g key={item.key}>
               <polyline points={area} fill={item.fill} opacity="0.18" />
               <polyline points={points} fill="none" stroke={item.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-              {data.map((row, index) => (
+              {normalizedData.map((row, index) => (
                 <g key={`${item.key}-${row.date}`}>
                   <text x={xFor(index)} y={yFor(row[item.key] || 0) - 7} textAnchor="middle" fill={item.color} fontSize="15" fontWeight="700">
                     {row[item.key] || 0}
@@ -195,7 +201,7 @@ function LineChart({ data, series }) {
             </g>
           );
         })}
-        {data.map((row, index) => (
+        {normalizedData.map((row, index) => (
           <text key={row.date} x={xFor(index)} y={height - 4} textAnchor="middle" fill="var(--color-text-muted)" fontSize="15">
             {row.date}
           </text>
@@ -213,8 +219,8 @@ function LineChart({ data, series }) {
   );
 }
 
-function RankingList({ items, tone = "error" }) {
-  const topItems = (items || []).slice(0, 3);
+function RankingList({ items, tone = "error", limit = 3 }) {
+  const topItems = (items || []).slice(0, limit);
   const maxValue = Math.max(1, ...topItems.map((item) => item.count || 0));
   const color = tone === "accent" ? "var(--color-accent)" : "var(--color-error-text)";
 
@@ -238,20 +244,42 @@ function RankingList({ items, tone = "error" }) {
   );
 }
 
-function EfficiencyCard({ data }) {
+function RankingModal({ title, items, tone = "error", onClose }) {
+  const color = tone === "accent" ? "var(--color-accent)" : "var(--color-error-text)";
+  const maxValue = Math.max(1, ...(items || []).map((item) => Number(item.count || 0)));
   return (
-    <div className="grid min-w-0 gap-[var(--layout-content-gap)] md:grid-cols-3">
-      <div className="flex min-w-0 items-center justify-between gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-padding-x)]">
-        <span className="text-ui-medium text-[var(--color-text-muted)]">解决比例</span>
-        <span className="shrink-0 text-ui-medium font-bold text-[var(--color-accent)]">{percent(data?.resolve_rate || 0)}</span>
-      </div>
-      <div className="flex min-w-0 items-center justify-between gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-padding-x)]">
-        <span className="text-ui-medium text-[var(--color-text-muted)]">平均解决时间</span>
-        <span className="shrink-0 text-ui-medium font-bold text-[var(--color-text-main)]">{formatNumber(data?.avg_resolve_hours || 0, 1)}h</span>
-      </div>
-      <div className="flex min-w-0 items-center justify-between gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-padding-x)]">
-        <span className="text-ui-medium text-[var(--color-text-muted)]">待处理工单</span>
-        <span className="shrink-0 text-ui-medium font-bold text-[var(--color-error-text)]">{data?.pending || 0}</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35">
+      <div className="max-h-[80vh] w-[min(72rem,calc(100%-var(--layout-content-padding)*2))] overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+        <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+          <h2 className="text-ui-large font-bold text-[var(--color-text-main)]">{title}</h2>
+          <button type="button" onClick={onClose} className="text-ui-medium text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]">关闭</button>
+        </header>
+        <div className="max-h-[65vh] overflow-auto p-[var(--layout-content-padding)]">
+          <table className="w-full border-separate border-spacing-0 text-ui-medium">
+            <thead className="text-[var(--color-text-muted)]">
+              <tr>
+                <th className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-left">排名</th>
+                <th className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-left">名称</th>
+                <th className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-left">分布</th>
+                <th className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-right">次数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).map((item, index) => (
+                <tr key={`${item.name}-${index}`}>
+                  <td className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)]">{index + 1}</td>
+                  <td className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-[var(--color-text-main)]">{item.name}</td>
+                  <td className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)]">
+                    <div className="h-[calc(var(--font-small)*0.42)] overflow-hidden rounded-full bg-[var(--color-control-bg)]">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max((Number(item.count || 0) / maxValue) * 100, item.count ? 3 : 0)}%`, backgroundColor: color }} />
+                    </div>
+                  </td>
+                  <td className="border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-right font-bold" style={{ color }}>{item.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -272,6 +300,7 @@ export default function StatisticsView({ focusTarget }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [rankingModal, setRankingModal] = useState(null);
 
   const scopeParams = useMemo(() => buildScopeParams(focusTarget), [focusTarget]);
 
@@ -299,6 +328,7 @@ export default function StatisticsView({ focusTarget }) {
   }, [data]);
 
   const scopeName = data?.scope?.name || focusTarget?.name || "全部区域";
+  const cameraTotal = Number(data?.device_status?.cameras?.total || 0);
 
   if (loading) {
     return (
@@ -310,10 +340,10 @@ export default function StatisticsView({ focusTarget }) {
 
   return (
     <main className="min-w-0 flex-1 overflow-auto bg-[var(--color-page-bg)] transition-colors">
-      <div className="m-[var(--layout-content-padding)] flex min-h-0 flex-col gap-[var(--layout-content-gap)]">
+      <div className="m-[var(--layout-content-padding)] flex min-h-0 flex-col gap-[calc(var(--layout-content-gap)*4.95)]">
         <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)] shadow-[var(--shadow-panel)]">
           <div className="flex min-w-0 flex-wrap items-center gap-[var(--layout-content-gap)]">
-            <h1 className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">统计数据</h1>
+            <h1 className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">统计分析</h1>
             <span className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-muted)]" title={scopeName}>
               当前范围：{scopeName}
             </span>
@@ -337,32 +367,21 @@ export default function StatisticsView({ focusTarget }) {
           <Panel title="黄金指标 - 流链路全局健康度" icon={Gauge}>
             <HealthGauge value={data?.golden_metrics?.global_stream_health || 0} formula={data?.golden_metrics?.formula || ""} formulaLatex={data?.golden_metrics?.formula_latex || ""} sampleCount={data?.golden_metrics?.sample_count || 0} />
           </Panel>
-          <Panel title="KQI 恶化比例统计" icon={AlertTriangle}>
+          <Panel title="画面异常类型统计" icon={AlertTriangle}>
             <KqiBar items={data?.kqi_degradation || []} />
           </Panel>
         </div>
 
         <div className="grid min-w-0 gap-[var(--layout-content-gap)] xl:grid-cols-2">
-          <Panel title="异常告警统计（一周）" icon={BarChart3}>
-            <LineChart data={data?.anomaly_trend || []} series={[{ key: "count", label: "异常数量", color: "var(--color-error-text)", fill: "var(--color-error-text)" }]} />
-          </Panel>
-          <Panel title="工单处置统计（一周）" icon={FileCheck2}>
-            <LineChart data={data?.work_order_trend || []} series={[{ key: "created", label: "新增工单", color: "var(--color-error-text)", fill: "var(--color-error-text)" }, { key: "resolved", label: "已解决工单", color: "var(--color-accent)", fill: "var(--color-accent)" }]} />
-          </Panel>
-        </div>
-
-        <div className="grid min-w-0 gap-[var(--layout-content-gap)] xl:grid-cols-2">
-          <Panel title="异常模式统计TOP3" icon={AlertTriangle}>
+          <Panel title="告警类型统计TOP3" icon={AlertTriangle} action={<button type="button" onClick={() => setRankingModal({ title: "告警类型完整表格", items: data?.anomaly_patterns || [], tone: "error" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">完整表格</button>}>
             <RankingList items={data?.anomaly_patterns || []} />
           </Panel>
-          <Panel title="异常实体统计TOP3" icon={TrendingUp}>
+          <Panel title="根因实体统计TOP3" icon={TrendingUp} action={<button type="button" onClick={() => setRankingModal({ title: "根因实体完整表格", items: data?.anomaly_entities || [], tone: "accent" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">完整表格</button>}>
             <RankingList items={data?.anomaly_entities || []} tone="accent" />
           </Panel>
         </div>
 
-        <Panel title="工单处置效率" icon={Clock3}>
-          <EfficiencyCard data={data?.work_order_efficiency || {}} />
-        </Panel>
+        {rankingModal && <RankingModal {...rankingModal} onClose={() => setRankingModal(null)} />}
       </div>
     </main>
   );

@@ -7,34 +7,24 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  Plus,
+  Trash2,
   Camera,
   Map,
-  Video,
   Database,
-  ClipboardList,
+  Bell,
   BarChart3,
-  Square,
-  Grid2X2,
-  Grid3X3,
   Type,
   Moon,
   UserCircle,
   Loader2,
   AlertCircle,
   Network,
-  Joystick,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
 } from "lucide-react";
-import logo from "../../assets/bupt.png";
-import VideoBrowse from "../../pages/VideoBrowse";
 import MapView from "../../pages/MapView";
 import DeviceManage from "../../pages/DeviceManage";
-import WorkOrderManage from "../../pages/WorkOrderManage";
+import VideoAlarmManage from "../../pages/VideoAlarmManage";
 import StatisticsView from "../../pages/StatisticsView";
-import { getCameraPreview } from "../../services/videoApi";
 
 
 import {
@@ -43,18 +33,19 @@ import {
   getNavTreeNode,
   searchNavTree,
 } from "../../services/regionApi";
+import { clearVideoDiagnosisHistory } from "../../services/diagnosisApi";
 
 
 const FAVORITES_STORAGE_KEY = "viot-favorite-region-nodes-v2";
+const CUSTOM_FOLDERS_STORAGE_KEY = "viot-custom-camera-folders-v1";
 
 const COUNTRY_NODE_ID = "country-100000-cn";
 
 const tabs = [
-  { key: "video", label: "视频浏览", icon: Video },
   { key: "map", label: "运维大屏", icon: Map },
-  { key: "device", label: "设备管理", icon: Database },
-  { key: "ticket", label: "工单管理", icon: ClipboardList },
-  { key: "stats", label: "统计数据", icon: BarChart3 },
+  { key: "alarm", label: "异常告警", icon: Bell },
+  { key: "device", label: "根因诊断", icon: Database },
+  { key: "stats", label: "统计分析", icon: BarChart3 },
 ];
 
 function looksLikeMojibake(value) {
@@ -102,6 +93,49 @@ function readFavoriteNodes() {
   } catch {
     return {};
   }
+}
+
+function readCustomFolders() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CUSTOM_FOLDERS_STORAGE_KEY) || "{}");
+    return Object.fromEntries(
+      Object.entries(stored).map(([key, value]) => [key, repairStoredNode(value)])
+    );
+  } catch {
+    return {};
+  }
+}
+
+function normalizeCameraForCustomFolder(camera) {
+  return {
+    ...camera,
+    id: camera.id || `camera-${camera.cameraId || camera.camera_id}`,
+    nodeType: "camera",
+    cameraId: camera.cameraId || camera.camera_id || camera.id?.replace(/^camera-/, "") || "",
+    name: repairText(camera.name || camera.regionName || camera.cameraName || "未命名摄像机"),
+    children: [],
+    loaded: true,
+    isLeaf: true,
+  };
+}
+
+function makeCustomFolderNode({ id, name, regionCode, regionName, children = [] }) {
+  const normalizedChildren = children.map(normalizeCameraForCustomFolder);
+  const online = normalizedChildren.filter((camera) => camera.status !== "offline").length;
+  return {
+    id,
+    nodeType: "custom_folder",
+    regionCode,
+    parentCode: regionCode,
+    name: repairText(name || "自定义文件夹"),
+    regionName: repairText(regionName || ""),
+    level: "custom_folder",
+    children: normalizedChildren,
+    loaded: true,
+    isLeaf: normalizedChildren.length === 0,
+    online,
+    total: normalizedChildren.length,
+  };
 }
 
 
@@ -239,6 +273,7 @@ function updateFavoriteNodes(favoriteNodes, targetId, updater) {
 
 function toFavoriteNode(node) {
   const isCamera = node.nodeType === "camera";
+  const isCustomFolder = node.nodeType === "custom_folder";
   const displayName = repairText(node.name || node.raw?.region_name || node.raw?.name || "未命名节点");
 
   return {
@@ -257,10 +292,10 @@ function toFavoriteNode(node) {
     online: Number(node.online || 0),
     total: Number(node.total || 0),
 
-    // 运行时按需加载 children，并保持 localStorage 中的展开状态。
-    children: [],
-    loaded: isCamera,
-    isLeaf: isCamera || node.isLeaf,
+    // 行政区收藏运行时按需加载 children；自定义文件夹需要保留手动加入的摄像机。
+    children: isCustomFolder ? (node.children || []).map(normalizeCameraForCustomFolder) : [],
+    loaded: isCamera || isCustomFolder,
+    isLeaf: isCamera || (isCustomFolder ? false : node.isLeaf),
 
     // raw 字段供功能页透传行政区和摄像机上下文，避免把展示树结构耦合到业务页。
     raw: {
@@ -311,6 +346,32 @@ function refreshFavoriteNodeStats(favoriteNodes, latestRootNodes) {
   });
 
   return next;
+}
+
+function attachCustomFoldersToTree(nodes, customFolders) {
+  const folders = Object.values(customFolders);
+  if (!folders.length) return nodes;
+
+  return nodes.map((node) => {
+    const children = Array.isArray(node.children)
+      ? attachCustomFoldersToTree(node.children, customFolders)
+      : [];
+
+    if (node.level !== "town") {
+      return { ...node, children };
+    }
+
+    const folderChildren = folders
+      .filter((folder) => folder.regionCode === node.regionCode)
+      .map(makeCustomFolderNode);
+
+    return {
+      ...node,
+      children: [...folderChildren, ...children],
+      loaded: node.loaded,
+      isLeaf: false,
+    };
+  });
 }
 
 
@@ -407,9 +468,15 @@ function TreeNode({
   onRefreshNode,
   onCameraDoubleClick,
   onNodeDoubleClick,
+  onCreateCustomFolder,
+  onDeleteCustomFolder,
+  onDropCameraToCustomFolder,
+  onRemoveCameraFromCustomFolder,
+  parentCustomFolderId = "",
 }) {
   const isLoading = loadingNodeId === node.id;
   const isCamera = node.nodeType === "camera";
+  const isCustomFolder = node.nodeType === "custom_folder";
   const isLeaf = node.isLeaf || isCamera;
   const open = expandedNodeIds.has(node.id);
   const canExpand = !isLeaf && (node.children?.length > 0 || !node.loaded);
@@ -449,6 +516,7 @@ function TreeNode({
   return (
     <div>
       <div
+        draggable={isCamera}
         className={`group flex min-h-[var(--layout-tree-row-height)] items-center rounded-[var(--layout-radius-md)] pr-[var(--layout-tree-padding-right)] text-ui-medium transition-colors ${
           isPreviewing
             ? "bg-[var(--color-hover-bg)] text-emerald-500"
@@ -457,6 +525,36 @@ function TreeNode({
             : "text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)]"
         }`}
         style={{ paddingLeft: `calc(var(--layout-tree-indent-base) + ${depth} * var(--layout-tree-indent-step))` }}
+        onDragStart={(event) => {
+          if (!isCamera) return;
+          event.dataTransfer.effectAllowed = "copy";
+          event.dataTransfer.setData("application/x-viot-camera", JSON.stringify({
+            ...normalizeCameraForCustomFolder(node),
+            sourceCustomFolderId: parentCustomFolderId,
+          }));
+        }}
+        onDragOver={(event) => {
+          if (!isCustomFolder) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) => {
+          if (!isCustomFolder) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const raw = event.dataTransfer.getData("application/x-viot-camera");
+          if (!raw) return;
+          try {
+            const camera = JSON.parse(raw);
+            onDropCameraToCustomFolder?.(node, camera);
+          } catch (error) {
+            console.error("Failed to parse dropped camera:", error);
+          }
+        }}
+        onDragEnd={(event) => {
+          if (!isCamera || !parentCustomFolderId) return;
+          onRemoveCameraFromCustomFolder?.(parentCustomFolderId, normalizeCameraForCustomFolder(node));
+        }}
         onDoubleClick={() => {
           onNodeDoubleClick?.(node);
 
@@ -527,6 +625,30 @@ function TreeNode({
             <RefreshCw size="var(--icon-tree-action)" />
           </button>
         )}
+        {node.level === "town" && (
+          <button
+            title="新建自定义文件夹"
+            onClick={(event) => {
+              event.stopPropagation();
+              onCreateCustomFolder?.(node);
+            }}
+            className="ml-[var(--layout-tree-action-gap)] hidden rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] group-hover:block"
+          >
+            <Plus size="var(--icon-tree-action)" />
+          </button>
+        )}
+        {isCustomFolder && (
+          <button
+            title="删除自定义文件夹"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteCustomFolder?.(node);
+            }}
+            className="ml-[var(--layout-tree-action-gap)] hidden rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)] group-hover:block"
+          >
+            <Trash2 size="var(--icon-tree-action)" />
+          </button>
+        )}
         <button
           title={isFavorite ? "取消收藏" : "收藏"}
           onClick={(event) => {
@@ -556,6 +678,11 @@ function TreeNode({
               onRefreshNode={onRefreshNode}
               onCameraDoubleClick={onCameraDoubleClick}
               onNodeDoubleClick={onNodeDoubleClick}
+              onCreateCustomFolder={onCreateCustomFolder}
+              onDeleteCustomFolder={onDeleteCustomFolder}
+              onDropCameraToCustomFolder={onDropCameraToCustomFolder}
+              onRemoveCameraFromCustomFolder={onRemoveCameraFromCustomFolder}
+              parentCustomFolderId={isCustomFolder ? node.id : parentCustomFolderId}
             />
           ))}
         </div>
@@ -576,7 +703,6 @@ function Sidebar({
   sidebarWidth,
   setSidebarWidth,
   previewingCameraIds,
-  ptzOpen,
   onCameraDoubleClick,
   onNodeDoubleClick,
 }) {
@@ -584,6 +710,7 @@ function Sidebar({
   const [keyword, setKeyword] = useState("");
   const [tree, setTree] = useState([]);
   const [favoriteNodes, setFavoriteNodes] = useState(readFavoriteNodes);
+  const [customFolders, setCustomFolders] = useState(readCustomFolders);
   const [loadingRoot, setLoadingRoot] = useState(false);
   const [loadingNodeId, setLoadingNodeId] = useState("");
   const [error, setError] = useState("");
@@ -872,6 +999,14 @@ function Sidebar({
     }
   }, [favoriteNodes]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOM_FOLDERS_STORAGE_KEY, JSON.stringify(customFolders));
+    } catch (error) {
+      console.error("Failed to save custom folders:", error);
+    }
+  }, [customFolders]);
+
 
 
 
@@ -958,6 +1093,9 @@ function Sidebar({
         raw: latestNode.raw,
       };
     } catch (error) {
+      if (isCanceledRequest(error)) {
+        return node;
+      }
       console.error("Failed to refresh favorite region node:", error);
     }
 
@@ -1087,6 +1225,109 @@ function Sidebar({
     }));
   };
 
+  const handleCreateCustomFolder = (townNode) => {
+    if (townNode.level !== "town") return;
+    const name = window.prompt("请输入自定义文件夹名称", `${townNode.name}自定义分组`);
+    const trimmedName = name?.trim();
+    if (!trimmedName) return;
+
+    const id = `custom-folder-${townNode.regionCode}-${Date.now()}`;
+    setCustomFolders((prev) => ({
+      ...prev,
+      [id]: makeCustomFolderNode({
+        id,
+        name: trimmedName,
+        regionCode: townNode.regionCode,
+        regionName: townNode.name,
+        parentId: townNode.id,
+        children: [],
+      }),
+    }));
+    setNodeExpanded(townNode.id, true);
+    setError("");
+  };
+
+  const handleDropCameraToCustomFolder = (folderNode, cameraNode) => {
+    const camera = normalizeCameraForCustomFolder(cameraNode);
+    if (!camera.cameraId) return;
+
+    let updatedFolder = null;
+    setCustomFolders((prev) => {
+      const folder = prev[folderNode.id];
+      if (!folder) return prev;
+      const children = Array.isArray(folder.children) ? folder.children : [];
+      if (children.some((item) => normalizeCameraForCustomFolder(item).cameraId === camera.cameraId)) {
+        return prev;
+      }
+      updatedFolder = makeCustomFolderNode({
+        ...folder,
+        children: [...children, camera],
+      });
+      return {
+        ...prev,
+        [folderNode.id]: updatedFolder,
+      };
+    });
+
+    setFavoriteNodes((prev) => {
+      if (!updatedFolder || !prev[folderNode.id]) return prev;
+      return {
+        ...prev,
+        [folderNode.id]: toFavoriteNode(updatedFolder),
+      };
+    });
+    setNodeExpanded(folderNode.id, true);
+  };
+
+  const handleDeleteCustomFolder = (folderNode) => {
+    if (folderNode.nodeType !== "custom_folder") return;
+    const confirmed = window.confirm(`确定删除自定义文件夹“${folderNode.name}”吗？`);
+    if (!confirmed) return;
+
+    setCustomFolders((prev) => {
+      const next = { ...prev };
+      delete next[folderNode.id];
+      return next;
+    });
+    setFavoriteNodes((prev) => {
+      if (!prev[folderNode.id]) return prev;
+      const next = { ...prev };
+      delete next[folderNode.id];
+      return next;
+    });
+    setNodeExpanded(folderNode.id, false);
+  };
+
+  const handleRemoveCameraFromCustomFolder = (folderId, cameraNode) => {
+    const camera = normalizeCameraForCustomFolder(cameraNode);
+    if (!camera.cameraId) return;
+
+    let updatedFolder = null;
+    setCustomFolders((prev) => {
+      const folder = prev[folderId];
+      if (!folder) return prev;
+      const children = (folder.children || [])
+        .map(normalizeCameraForCustomFolder)
+        .filter((item) => item.cameraId !== camera.cameraId);
+      updatedFolder = makeCustomFolderNode({
+        ...folder,
+        children,
+      });
+      return {
+        ...prev,
+        [folderId]: updatedFolder,
+      };
+    });
+
+    setFavoriteNodes((prev) => {
+      if (!updatedFolder || !prev[folderId]) return prev;
+      return {
+        ...prev,
+        [folderId]: toFavoriteNode(updatedFolder),
+      };
+    });
+  };
+
   const rawTree = useMemo(() => {
     if (mode === "favorite") {
       const sourceNodes =
@@ -1094,13 +1335,13 @@ function Sidebar({
           ? favoriteDisplayNodes
           : Object.values(favoriteNodes);
 
-      return sourceNodes
+      return attachCustomFoldersToTree(sourceNodes, customFolders)
         .map((node) => filterFavoriteNodeByStatus(node, cameraStatusFilter))
         .filter(Boolean);
     }
 
-    return tree;
-  }, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter]);
+    return attachCustomFoldersToTree(tree, customFolders);
+  }, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter, customFolders]);
 
   const shownTree = useMemo(() => {
     if (searchMode || mode === "favorite") return rawTree;
@@ -1206,6 +1447,10 @@ function Sidebar({
                   onRefreshNode={refreshNode}
                   onCameraDoubleClick={onCameraDoubleClick}
                   onNodeDoubleClick={onNodeDoubleClick}
+                  onCreateCustomFolder={handleCreateCustomFolder}
+                  onDeleteCustomFolder={handleDeleteCustomFolder}
+                  onDropCameraToCustomFolder={handleDropCameraToCustomFolder}
+                  onRemoveCameraFromCustomFolder={handleRemoveCameraFromCustomFolder}
                 />
               ))}
             </div>
@@ -1235,79 +1480,7 @@ function Sidebar({
         }}
       />
 
-      {ptzOpen && <PtzControlPanel />}
-      
     </aside>
-  );
-}
-
-function PtzControlPanel() {
-  const [ptzSpeed, setPtzSpeed] = useState(50);
-  const directionButtons = [
-    { key: "up-left", label: "左上", className: "col-start-1 row-start-1", symbol: "↖" },
-    { key: "up", label: "上", className: "col-start-2 row-start-1", icon: ArrowUp },
-    { key: "up-right", label: "右上", className: "col-start-3 row-start-1", symbol: "↗" },
-    { key: "left", label: "左", className: "col-start-1 row-start-2", icon: ArrowLeft },
-    { key: "center", label: "停止", className: "col-start-2 row-start-2", symbol: "●" },
-    { key: "right", label: "右", className: "col-start-3 row-start-2", icon: ArrowRight },
-    { key: "down-left", label: "左下", className: "col-start-1 row-start-3", symbol: "↙" },
-    { key: "down", label: "下", className: "col-start-2 row-start-3", icon: ArrowDown },
-    { key: "down-right", label: "右下", className: "col-start-3 row-start-3", symbol: "↘" },
-  ];
-
-  const quickActions = ["放大", "缩小", "聚焦", "巡航", "复位", "光圈", "框选", "预置位"];
-  const speedText = ptzSpeed < 34 ? "低速" : ptzSpeed > 66 ? "高速" : "中速";
-
-  return (
-    <div data-ptz-panel className="absolute bottom-[var(--layout-sidebar-padding)] left-[var(--layout-sidebar-padding)] z-40 w-[calc(100%_-_var(--layout-sidebar-padding)*2)] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-sidebar-padding)] text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
-      <div className="mb-[var(--layout-content-gap)] flex items-center justify-between gap-[var(--layout-search-gap)]">
-        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
-          <Joystick size="var(--icon-bottom)" className="shrink-0 text-[var(--color-accent)]" />
-          <span className="truncate text-ui-medium font-semibold">云台控制</span>
-        </div>
-      </div>
-
-      <div className="mb-[var(--layout-content-gap)]">
-        <div className="mb-[var(--layout-search-padding-y)] flex items-center justify-between text-ui-small text-[var(--color-text-muted)]">
-          <span>云台速度</span>
-          <span>{speedText}</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={ptzSpeed}
-          onChange={(event) => setPtzSpeed(Number(event.target.value))}
-          style={{ "--ptz-speed": `${ptzSpeed}%` }}
-          className="h-[calc(var(--font-small)*0.7)] w-full cursor-pointer appearance-none rounded-full bg-[linear-gradient(90deg,var(--color-accent)_0_var(--ptz-speed),var(--color-control-bg)_var(--ptz-speed)_100%)] accent-[var(--color-accent)] [&::-moz-range-thumb]:h-[var(--icon-status)] [&::-moz-range-thumb]:w-[var(--icon-status)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--color-accent)] [&::-webkit-slider-thumb]:h-[var(--icon-status)] [&::-webkit-slider-thumb]:w-[var(--icon-status)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--color-accent)]"
-        />
-      </div>
-
-      <div className="grid grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)] items-center gap-[var(--layout-search-gap)]">
-        <div className="grid justify-start">
-          <div className="grid aspect-square w-[calc(var(--font-large)*6)] grid-cols-3 grid-rows-3 rounded-full border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-gap)] shadow-[inset_0_0_calc(var(--font-large)*0.5)_rgba(0,0,0,0.14)]">
-            {directionButtons.map(({ key, label, className, icon: Icon, symbol }) => (
-              <button key={key} type="button" title={label} className={`grid place-items-center rounded-full text-ui-small text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)] active:bg-[var(--color-accent)] active:text-[var(--color-topbar-active-text)] ${className}`}>
-                {Icon ? <Icon size="var(--icon-bottom)" /> : <span>{symbol}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-[var(--layout-search-gap)]">
-          {quickActions.map((label) => (
-            <button key={label} type="button" title={label} className="flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)] active:bg-[var(--color-accent)] active:text-[var(--color-topbar-active-text)]">
-              <span className="whitespace-nowrap">{label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-[var(--layout-content-gap)] grid grid-cols-2 gap-[var(--layout-search-gap)]">
-        <button type="button" className="min-h-[var(--layout-segment-button-height)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-main)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">设置预置点</button>
-        <button type="button" className="min-h-[var(--layout-segment-button-height)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-text-main)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">调用预置点</button>
-      </div>
-    </div>
   );
 }
 
@@ -1319,46 +1492,27 @@ function PtzControlPanel() {
 
 function ContentPlaceholder({
   activeTab,
-  videoGridSize,
-  videoStreams,
-  selectedVideoSlot,
-  videoConnectionError,
   mapFocusTarget,
   deviceFocusTarget,
-  ticketFocusTarget,
+  deviceResetVersion,
+  alarmFocusTarget,
+  alarmResetVersion,
   statsFocusTarget,
   darkMode,
-  onSelectVideoSlot,
-  onCloseVideoSlot,
   onOpenCameraDetail,
+  onOpenCameraDiagnosis,
   onCloseExternalDeviceDetail,
-  onClearVideoConnectionError,
 }) {
-  if (activeTab === "video") {
-    return (
-      <VideoBrowse
-        gridSize={videoGridSize}
-        streams={videoStreams}
-        selectedSlot={selectedVideoSlot}
-        connectionError={videoConnectionError}
-        onSelectSlot={onSelectVideoSlot}
-        onCloseSlot={onCloseVideoSlot}
-        onOpenCameraDetail={onOpenCameraDetail}
-        onClearConnectionError={onClearVideoConnectionError}
-      />
-    );
+  if (activeTab === "map") {
+    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} onOpenCameraDiagnosis={onOpenCameraDiagnosis} />;
   }
 
-  if (activeTab === "map") {
-    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} />;
+  if (activeTab === "alarm") {
+    return <VideoAlarmManage focusTarget={alarmFocusTarget} resetVersion={alarmResetVersion} onOpenCameraDiagnosis={onOpenCameraDiagnosis} />;
   }
 
   if (activeTab === "device") {
-    return <DeviceManage focusTarget={deviceFocusTarget} onCloseExternalDetail={onCloseExternalDeviceDetail} />;
-  }
-
-  if (activeTab === "ticket") {
-    return <WorkOrderManage focusTarget={ticketFocusTarget} />;
+    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} />;
   }
 
   if (activeTab === "stats") {
@@ -1390,10 +1544,8 @@ function BottomBar({
   activeTab,
   sidebarWidth,
   onResetSidebar,
-  videoGridSize,
-  onVideoGridSizeChange,
-  ptzOpen,
-  onTogglePtz,
+  onResetAlarms,
+  onResetDiagnoses,
 }) {
   return (
     <footer className="flex h-[var(--layout-footer-height)] shrink-0 border-t border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-ui-small text-[var(--color-text-muted)] transition-colors">
@@ -1418,28 +1570,10 @@ function BottomBar({
       <div className="flex min-w-0 flex-1 items-center justify-between overflow-hidden px-[var(--layout-content-padding)]">
         <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
           <span className="truncate">{getPageBottomHint(activeTab)}</span>
-          {activeTab === "video" && (
-            <button
-              data-ptz-trigger
-              type="button"
-              title="云台控制"
-              onClick={onTogglePtz}
-              className={`flex h-[var(--layout-bottom-button-size)] w-[var(--layout-bottom-button-size)] shrink-0 items-center justify-center rounded-[var(--layout-radius-sm)] transition-colors ${
-                ptzOpen
-                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)]"
-                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"
-              }`}
-            >
-              <Joystick size="var(--icon-bottom)" />
-            </button>
-          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
-          {getPageBottomActions(activeTab, {
-            videoGridSize,
-            onVideoGridSizeChange,
-          })}
+          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses })}
         </div>
       </div>
     </footer>
@@ -1448,60 +1582,36 @@ function BottomBar({
 
 function getPageBottomHint(activeTab) {
   const map = {
-    video: "视频浏览工具栏",
     map: "运维大屏工具栏",
-    device: "设备管理工具栏",
-    ticket: "工单管理工具栏",
-    stats: "统计数据工具栏",
+    alarm: "异常告警工具栏",
+    device: "根因诊断工具栏",
+    stats: "统计分析工具栏",
   };
 
   return map[activeTab] || "页面工具栏";
 }
 
 function getPageBottomActions(activeTab, options = {}) {
-  if (activeTab === "video") {
-    const gridOptions = [
-      { value: 1, label: "1宫格", icon: Square },
-      { value: 4, label: "4宫格", icon: Grid2X2 },
-      { value: 9, label: "9宫格", icon: Grid3X3 },
-    ];
-
+  if (activeTab === "alarm") {
     return (
-      <div className="flex items-center gap-[var(--layout-search-gap)]">
-        {gridOptions.map(({ value, label, icon: Icon }) => {
-          const active = options.videoGridSize === value;
-
-          return (
-            <button
-              key={value}
-              type="button"
-              title={label}
-              onClick={() => options.onVideoGridSizeChange?.(value)}
-              className={`flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] transition-colors ${
-                active
-                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)]"
-                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"
-              }`}
-            >
-              <Icon size="var(--icon-bottom)" />
-              <span>{label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <button type="button" onClick={options.onResetAlarms} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+        <RefreshCw size="var(--icon-bottom)" />
+        刷新告警确认
+      </button>
     );
   }
 
   if (activeTab === "map") {
-    return <span>后续可扩展地图缩放、图层切换、定位等工具</span>;
+    return <span>后续可扩展运维大屏更多工具</span>;
   }
 
   if (activeTab === "device") {
-    return <span>后续可扩展批量操作、导入导出等工具</span>;
-  }
-
-  if (activeTab === "ticket") {
-    return <span>后续可扩展工单筛选、派发、关闭等工具</span>;
+    return (
+      <button type="button" onClick={options.onResetDiagnoses} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+        <RefreshCw size="var(--icon-bottom)" />
+        刷新诊断历史
+      </button>
+    );
   }
 
   if (activeTab === "stats") {
@@ -1516,103 +1626,19 @@ function getPageBottomActions(activeTab, options = {}) {
 
 
 export default function VioTMasterLayout() {
-  const [activeTab, setActiveTab] = useState("video");
+  const [activeTab, setActiveTab] = useState("map");
   const [largeFont, setLargeFont] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [resetVersion, setResetVersion] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(null); 
-  const [videoGridSize, setVideoGridSize] = useState(4);
-  const [videoStreams, setVideoStreams] = useState([]);
-  const [selectedVideoSlot, setSelectedVideoSlot] = useState(0);
-  const [videoConnectionError, setVideoConnectionError] = useState("");
-  const [ptzOpen, setPtzOpen] = useState(false);
   const [mapFocusTarget, setMapFocusTarget] = useState(null);
   const [deviceFocusTarget, setDeviceFocusTarget] = useState(null);
-  const [ticketFocusTarget, setTicketFocusTarget] = useState(null);
+  const [deviceResetVersion, setDeviceResetVersion] = useState(0);
+  const [alarmFocusTarget, setAlarmFocusTarget] = useState(null);
+  const [alarmResetVersion, setAlarmResetVersion] = useState(0);
   const [statsFocusTarget, setStatsFocusTarget] = useState(null);
   const externalDetailReturnTabRef = useRef("");
-  const offlinePreviewTimersRef = useRef({});
-
-  const previewingCameraIds = useMemo(
-    () =>
-      new Set(
-        videoStreams
-          .filter((stream) => stream?.playUrl)
-          .map((stream) => stream.cameraId)
-      ),
-    [videoStreams]
-  );
-
-  useEffect(() => {
-    if (!ptzOpen) return undefined;
-
-    const handlePointerDown = (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest("[data-ptz-panel]") || target.closest("[data-ptz-trigger]")) return;
-
-      setPtzOpen(false);
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-    };
-  }, [ptzOpen]);
-
-  useEffect(() => {
-    if (activeTab !== "video") {
-      setPtzOpen(false);
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    return () => {
-      Object.values(offlinePreviewTimersRef.current).forEach(window.clearTimeout);
-    };
-  }, []);
-
-  const getVideoTargetSlot = (streams, cameraId) => {
-    const sameCameraIndex = streams.findIndex(
-      (stream) => stream?.cameraId === cameraId
-    );
-    const firstEmptyIndex = streams.findIndex((stream) => !stream);
-
-    if (sameCameraIndex >= 0) return sameCameraIndex;
-    if (!streams[selectedVideoSlot]) return selectedVideoSlot;
-    if (firstEmptyIndex >= 0) return firstEmptyIndex;
-
-    return selectedVideoSlot;
-  };
-
-  const clearOfflinePreviewTimer = (slotIndex) => {
-    const timer = offlinePreviewTimersRef.current[slotIndex];
-    if (!timer) return;
-
-    window.clearTimeout(timer);
-    delete offlinePreviewTimersRef.current[slotIndex];
-  };
-
-  const handleVideoGridSizeChange = (size) => {
-    setVideoGridSize(size);
-    Object.keys(offlinePreviewTimersRef.current).forEach((slotIndex) => {
-      if (Number(slotIndex) >= size) {
-        clearOfflinePreviewTimer(slotIndex);
-      }
-    });
-    setVideoStreams((prev) => prev.slice(0, size));
-    setSelectedVideoSlot((prev) => Math.min(prev, size - 1));
-  };
-
-  const handleCloseVideoSlot = (slotIndex) => {
-    clearOfflinePreviewTimer(slotIndex);
-    setVideoStreams((prev) => {
-      const next = [...prev];
-      next[slotIndex] = null;
-      return next;
-    });
-  };
+  const previewingCameraIds = useMemo(() => new Set(), []);
 
   const openCameraDetailFrom = (sourceTab, cameraLike) => {
     const cameraId = cameraLike?.cameraId || cameraLike?.camera_id || cameraLike?.id;
@@ -1632,6 +1658,24 @@ export default function VioTMasterLayout() {
     setActiveTab("device");
   };
 
+  const openCameraDiagnosisFrom = (sourceTab, cameraLike) => {
+    const cameraId = cameraLike?.cameraId || cameraLike?.camera_id || cameraLike?.id;
+    if (!cameraId) return;
+
+    externalDetailReturnTabRef.current = sourceTab;
+    setDeviceFocusTarget({
+      id: `camera-${cameraId}`,
+      nodeType: "camera",
+      cameraId,
+      name: cameraLike.cameraName || cameraLike.name || cameraId,
+      status: cameraLike.status || "",
+      openDiagnosis: true,
+      returnTab: sourceTab,
+      version: Date.now(),
+    });
+    setActiveTab("device");
+  };
+
   const handleCloseExternalDeviceDetail = () => {
     const returnTab = externalDetailReturnTabRef.current;
     externalDetailReturnTabRef.current = "";
@@ -1641,72 +1685,46 @@ export default function VioTMasterLayout() {
     }
   };
 
-  const handleCameraDoubleClick = async (cameraNode) => {
-    if (activeTab !== "video") return;
+  const handleCameraDoubleClick = (cameraNode) => {
     if (!cameraNode?.cameraId) return;
-
-    if (cameraNode.status === "offline") {
-      const loadedAt = Date.now();
-      const cameraName = cameraNode.name || cameraNode.cameraId;
-
-      setVideoStreams((prev) => {
-        const next = Array.from({ length: videoGridSize }, (_, index) => prev[index] || null);
-        const targetIndex = getVideoTargetSlot(next, cameraNode.cameraId);
-
-        clearOfflinePreviewTimer(targetIndex);
-        next[targetIndex] = {
-          cameraId: cameraNode.cameraId,
-          cameraName,
-          status: "connecting",
-          loadedAt,
-        };
-
-        setSelectedVideoSlot(targetIndex);
-
-        offlinePreviewTimersRef.current[targetIndex] = window.setTimeout(() => {
-          setVideoStreams((current) => {
-            if (current[targetIndex]?.loadedAt !== loadedAt) return current;
-
-            const cleared = [...current];
-            cleared[targetIndex] = {
-              cameraId: cameraNode.cameraId,
-              cameraName,
-              status: "failed",
-              loadedAt,
-            };
-            return cleared;
-          });
-
-          delete offlinePreviewTimersRef.current[targetIndex];
-        }, 3000);
-
-        return next;
-      });
-
+    if (activeTab === "map") {
+      setMapFocusTarget({ ...cameraNode, version: Date.now() });
       return;
     }
+    if (activeTab === "alarm") {
+      setAlarmFocusTarget({ ...cameraNode, version: Date.now() });
+      return;
+    }
+    if (activeTab === "device") {
+      setDeviceFocusTarget({ ...cameraNode, openDiagnosis: true, version: Date.now() });
+      return;
+    }
+    if (activeTab === "stats") {
+      setStatsFocusTarget({ ...cameraNode, version: Date.now() });
+      return;
+    }
+  };
 
+  const handleTabChange = (key) => {
+    if (key === "device") {
+      externalDetailReturnTabRef.current = "";
+      setDeviceFocusTarget(null);
+      setDeviceResetVersion((value) => value + 1);
+    }
+    setActiveTab(key);
+  };
+
+  const handleResetAlarmConfirmations = () => {
+    setAlarmResetVersion((value) => value + 1);
+  };
+
+  const handleResetDiagnosisHistory = async () => {
     try {
-      const preview = await getCameraPreview(cameraNode.cameraId);
-
-      setVideoStreams((prev) => {
-        const next = Array.from({ length: videoGridSize }, (_, index) => prev[index] || null);
-        const targetIndex = getVideoTargetSlot(next, preview.camera_id);
-
-        clearOfflinePreviewTimer(targetIndex);
-        next[targetIndex] = {
-          cameraId: preview.camera_id,
-          cameraName: preview.camera_name || cameraNode.name,
-          playUrl: preview.play_url,
-          startTime: Number(preview.start_time || 0),
-          loadedAt: Date.now(),
-        };
-
-        setSelectedVideoSlot(targetIndex);
-        return next;
-      });
+      await clearVideoDiagnosisHistory();
+      setDeviceFocusTarget(null);
+      setDeviceResetVersion((value) => value + 1);
     } catch (error) {
-      console.error("Failed to load camera preview:", error);
+      console.error("Failed to clear diagnosis history:", error);
     }
   };
 
@@ -1727,8 +1745,8 @@ export default function VioTMasterLayout() {
       return;
     }
 
-    if (activeTab === "ticket") {
-      setTicketFocusTarget({
+    if (activeTab === "alarm") {
+      setAlarmFocusTarget({
         ...node,
         version: Date.now(),
       });
@@ -1751,7 +1769,7 @@ export default function VioTMasterLayout() {
     >
       <TopBar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         onFontSizeToggle={() => setLargeFont((value) => !value)}
         onThemeToggle={() => setDarkMode((value) => !value)}
         darkMode={darkMode}
@@ -1763,37 +1781,30 @@ export default function VioTMasterLayout() {
           sidebarWidth={sidebarWidth}
           setSidebarWidth={setSidebarWidth}
           previewingCameraIds={previewingCameraIds}
-          ptzOpen={activeTab === "video" && ptzOpen}
           onCameraDoubleClick={handleCameraDoubleClick}
           onNodeDoubleClick={handleNavNodeDoubleClick}
         />
 
         <ContentPlaceholder
           activeTab={activeTab}
-          videoGridSize={videoGridSize}
-          videoStreams={videoStreams}
-          selectedVideoSlot={selectedVideoSlot}
-          onSelectVideoSlot={setSelectedVideoSlot}
-          onCloseVideoSlot={handleCloseVideoSlot}
           onOpenCameraDetail={(camera) => openCameraDetailFrom(activeTab, camera)}
+          onOpenCameraDiagnosis={(camera) => openCameraDiagnosisFrom(activeTab, camera)}
           onCloseExternalDeviceDetail={handleCloseExternalDeviceDetail}
-          videoConnectionError={videoConnectionError}
           mapFocusTarget={mapFocusTarget}
           deviceFocusTarget={deviceFocusTarget}
-          ticketFocusTarget={ticketFocusTarget}
+          deviceResetVersion={deviceResetVersion}
+          alarmFocusTarget={alarmFocusTarget}
+          alarmResetVersion={alarmResetVersion}
           statsFocusTarget={statsFocusTarget}
           darkMode={darkMode}
-          onClearVideoConnectionError={() => setVideoConnectionError("")}
         />
       </div>
 
       <BottomBar
         activeTab={activeTab}
         sidebarWidth={sidebarWidth}
-        videoGridSize={videoGridSize}
-        onVideoGridSizeChange={handleVideoGridSizeChange}
-        ptzOpen={ptzOpen}
-        onTogglePtz={() => setPtzOpen((value) => !value)}
+        onResetAlarms={handleResetAlarmConfirmations}
+        onResetDiagnoses={handleResetDiagnosisHistory}
         onResetSidebar={() => {
           setSidebarWidth(null);
           setResetVersion((value) => value + 1);

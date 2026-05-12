@@ -3,7 +3,8 @@ import request from "./request";
 export async function getDeviceCameras(params = {}) {
   const res = await request.get("/cameras", {
     params: {
-      limit: 1000,
+      limit: 5000,
+      include_fake: false,
       ...params,
     },
   });
@@ -60,7 +61,8 @@ export async function deleteDeviceServer(serverId) {
 export async function getDeviceStreams(params = {}) {
   const res = await request.get("/stream-medias", {
     params: {
-      limit: 1000,
+      limit: 5000,
+      include_fake: false,
       ...params,
     },
   });

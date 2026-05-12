@@ -30,6 +30,7 @@ import {
 import { getRegionByCode, getRegions } from "../services/regionApi";
 import { getCameraPreview } from "../services/videoApi";
 import { getLatestVideoDiagnosis, runVideoDiagnosis } from "../services/diagnosisApi";
+import { getStatisticsOverview } from "../services/statisticsApi";
 
 const cameraInitialForm = {
   id: "",
@@ -111,6 +112,36 @@ function streamStatusText(stream) {
   if (!stream.is_connected) return "断开";
   if (stream.is_fault) return "异常";
   return "正常";
+}
+
+function getCameraIdFromNode(camera) {
+  return camera?.cameraId || camera?.camera_id || camera?.id?.replace(/^camera-/, "") || "";
+}
+
+function buildStatisticsScopeParams(focusTarget) {
+  if (!focusTarget) return {};
+  if (focusTarget.nodeType === "camera" && focusTarget.cameraId) {
+    return { camera_id: focusTarget.cameraId };
+  }
+  if (focusTarget.nodeType === "custom_folder") {
+    const cameraIds = (focusTarget.children || [])
+      .map(getCameraIdFromNode)
+      .filter(Boolean);
+    return cameraIds.length ? { camera_ids: cameraIds.join(",") } : {};
+  }
+  if (focusTarget.nodeType !== "camera" && focusTarget.regionCode) {
+    return { region_code: focusTarget.regionCode };
+  }
+  return {};
+}
+
+function formatStatusMetricValue(status, unit, onlineLabel = "online") {
+  const normal = Number(status?.normal || 0);
+  const fault = Number(status?.fault || 0);
+  const offline = Number(status?.offline || 0);
+  const total = Number(status?.total || 0);
+  const active = onlineLabel === "normal" ? normal : Math.max(0, total - offline);
+  return `${active}/${total} ${unit}`;
 }
 
 function streamStatusClass(stream) {
@@ -220,7 +251,7 @@ function MetricCard({ icon: Icon, label, value }) {
   );
 }
 
-function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, readonly = false }) {
+function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDiagnose, readonly = false }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
       <table className="w-max min-w-full border-separate border-spacing-0 text-left text-ui-medium">
@@ -231,6 +262,11 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, reado
                 {column.label}
               </th>
             ))}
+            {onDiagnose && (
+              <th className="sticky right-[10rem] z-20 min-w-[10rem] whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
+                根因诊断
+              </th>
+            )}
             <th className="sticky right-0 z-20 min-w-[10rem] whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
               操作
             </th>
@@ -239,7 +275,7 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, reado
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + 1} className="px-[var(--layout-content-padding)] py-[var(--layout-content-padding)] text-center text-[var(--color-text-muted)]">
+              <td colSpan={columns.length + 1 + (onDiagnose ? 1 : 0)} className="px-[var(--layout-content-padding)] py-[var(--layout-content-padding)] text-center text-[var(--color-text-muted)]">
                 {emptyText}
               </td>
             </tr>
@@ -251,6 +287,14 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, reado
                     {column.render ? column.render(row) : formatValue(row[column.key])}
                   </td>
                 ))}
+                {onDiagnose && (
+                  <td className="sticky right-[10rem] z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
+                    <button type="button" onClick={() => onDiagnose(row)} className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small font-medium text-[var(--color-topbar-active-text)]">
+                      <Zap size="var(--icon-bottom)" />
+                      诊断
+                    </button>
+                  </td>
+                )}
                 <td className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
                   <div className="flex items-center gap-[var(--layout-search-gap)]">
                     <button type="button" title="详情" onClick={() => onView(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
@@ -586,7 +630,7 @@ function CameraPreview({ camera, onDiagnose }) {
           {clockText}
         </div>
         <button type="button" onClick={() => onDiagnose?.(camera)} className="absolute right-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] rounded-[var(--layout-radius-sm)] bg-black/60 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small font-semibold text-[var(--color-accent)] transition hover:underline">
-          视频诊断
+          根因诊断
         </button>
         <button type="button" onClick={togglePreview} disabled={!canPreview || previewLoading} className="absolute left-1/2 top-1/2 grid h-[4.5rem] w-[4.5rem] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white transition hover:bg-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-45">
           {previewLoading ? <Loader2 size="var(--icon-topbar)" className="animate-spin" /> : isPlaying ? "Ⅱ" : "▶"}
@@ -746,8 +790,46 @@ function formatDateTimeText(value) {
 }
 
 function buildDisposalSuggestion(camera, diagnosis) {
-  const base = diagnosis?.suggestion || "请先完成视频诊断，再根据诊断结果执行处置。";
+  const base = diagnosis?.suggestion || "请先完成根因诊断，再根据诊断结果执行处置。";
   return base;
+}
+
+function getRootCauseHierarchy(diagnosis) {
+  const hierarchy = diagnosis?.topology?.root_cause_hierarchy || {};
+  return {
+    level1: hierarchy.level1 || diagnosis?.root_cause_type || "无",
+    level2: hierarchy.level2 || diagnosis?.root_cause_node || "无",
+    level3: hierarchy.level3 || diagnosis?.root_cause_metric || "无",
+    target: hierarchy.target || diagnosis?.root_cause_node || "无",
+    reason: hierarchy.reason || diagnosis?.root_cause_metric || "暂无定位依据",
+  };
+}
+
+function formatRootCauseTitle(diagnosis) {
+  if (!diagnosis) return "暂无结果";
+  const hierarchy = getRootCauseHierarchy(diagnosis);
+  const parts = [hierarchy.level1, hierarchy.level2, hierarchy.level3]
+    .map((item) => String(item || "").trim())
+    .filter((item) => item && item !== "无");
+  return parts.length ? parts.join(" - ") : "暂无结果";
+}
+
+function RootCauseResultCard({ diagnosis }) {
+  const hierarchy = getRootCauseHierarchy(diagnosis);
+
+  return (
+    <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+      <div className="grid gap-[var(--layout-search-gap)] text-ui-medium lg:grid-cols-3">
+        <InfoLine label="一级根因" value={hierarchy.level1} />
+        <InfoLine label="二级根因" value={hierarchy.level2} />
+        <InfoLine label="三级根因" value={hierarchy.level3} wrap />
+      </div>
+      <div className="mt-[var(--layout-search-gap)] text-ui-medium">
+        <InfoLine label="定位依据" value={hierarchy.reason} wrap />
+      </div>
+      <div className="mt-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-main)]">{diagnosis?.conclusion}</div>
+    </div>
+  );
 }
 
 function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
@@ -792,11 +874,6 @@ function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
                 ) : (
                   <div className="mt-[var(--layout-tree-gap)] truncate text-ui-small text-[var(--color-text-muted)]" title={node.name}>{node.name}</div>
                 )}
-                {isFault && (
-                  <div className="mt-[var(--layout-tree-gap)] w-max max-w-[min(30rem,90vw)] whitespace-normal break-words rounded-[var(--layout-radius-sm)] border border-[var(--color-error-text)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-tree-action-padding)] text-left text-ui-small text-[var(--color-error-text)] shadow-[var(--shadow-panel)]" title={metric}>
-                    {metric}
-                  </div>
-                )}
               </div>
               {index < nodes.length - 1 && (
                 <div className="relative mt-[2.1rem] min-w-0">
@@ -809,11 +886,6 @@ function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
                   <div className={`relative mx-auto w-max max-w-full truncate rounded-[var(--layout-radius-sm)] bg-[var(--color-panel-bg)] px-[var(--layout-tree-action-padding)] text-ui-small ${(index === 0 && uplinkFault) || (index === 1 && downlinkFault) ? "text-[var(--color-error-text)]" : "text-[var(--color-text-muted)]"}`}>
                     {index === 0 ? "上行链路" : "下行链路"}
                   </div>
-                  {((index === 0 && uplinkFault) || (index === 1 && downlinkFault)) && metric && (
-                    <div className="mt-[var(--layout-content-gap)] w-max max-w-[min(30rem,90vw)] whitespace-normal break-words rounded-[var(--layout-radius-sm)] border border-[var(--color-error-text)] bg-[var(--color-error-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-tree-action-padding)] text-left text-ui-small text-[var(--color-error-text)] shadow-[var(--shadow-panel)]" title={metric}>
-                      {metric}
-                    </div>
-                  )}
                 </div>
               )}
             </Fragment>
@@ -837,7 +909,7 @@ function InferenceProgress({ progress = 0 }) {
   return (
     <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
       <div className="flex items-center justify-between gap-[var(--layout-content-gap)] text-ui-medium">
-        <span className="font-semibold text-[var(--color-text-main)]">异常检测算法推理</span>
+        <span className="font-semibold text-[var(--color-text-main)]">根因定位算法推理</span>
         <span className="font-mono text-[var(--color-accent)]">{safeProgress}%</span>
       </div>
       <div className="relative mt-[var(--layout-search-gap)] h-[0.75rem] overflow-hidden rounded-full bg-[var(--color-panel-border)]">
@@ -846,7 +918,7 @@ function InferenceProgress({ progress = 0 }) {
           <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-white/35" style={{ transform: `translateX(${Math.max(0, safeProgress * 2.3)}%)` }} />
         )}
       </div>
-      <div className="mt-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">融合历史时间窗、链路拓扑和上下游指标，生成视频健康度。</div>
+      <div className="mt-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">融合历史时间窗、链路拓扑和上下游指标，定位三级根因。</div>
     </div>
   );
 }
@@ -935,7 +1007,7 @@ function VideoDiagnosisView({ camera, onClose }) {
     "分析上下游联动影响",
     "校验 RTP 抖动与乱序",
     "比对流媒体转码负荷",
-    "计算视频业务健康评分",
+    "计算三级根因置信度",
   ];
 
   useEffect(() => {
@@ -1049,14 +1121,14 @@ function VideoDiagnosisView({ camera, onClose }) {
               : "Ping 可达，基础网络连通，继续第三步。",
         }] : []),
         ...(stage >= 3 && camera.status !== "offline" ? [{ index: 3, title: "获取拓扑信息", status: "done", description: "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。" }] : []),
-        ...(stage >= 4 && camera.status !== "offline" ? [{ index: 4, title: "启动异常检测算法", status: "done", description: marqueeItems[stage % marqueeItems.length] }] : []),
+        ...(stage >= 4 && camera.status !== "offline" ? [{ index: 4, title: "启动根因定位算法", status: "done", description: marqueeItems[stage % marqueeItems.length] }] : []),
       ]
     : (diagnosis?.steps || []).filter((step) => step.index !== 5);
 
   const score = camera.status === "offline" ? 0 : (diagnosis?.health_score ?? 0);
   const startTimeText = running ? formatDateTimeText(runStartedAt) : formatDateTimeText(diagnosis?.started_at);
   const endTimeText = running ? formatDateTimeText(runEndedAt) : formatDateTimeText(diagnosis?.ended_at);
-  const resultTitle = running ? "诊断中" : diagnosis?.business_status || "暂无结果";
+  const resultTitle = running ? "诊断中" : formatRootCauseTitle(diagnosis);
   const resultScore = diagnosis ? `${score}分` : "--";
   const resultToneClass = camera.status === "offline"
     ? "text-[var(--color-text-muted)]"
@@ -1084,7 +1156,7 @@ function VideoDiagnosisView({ camera, onClose }) {
       <section className="overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
         <header className="flex min-h-[var(--layout-segment-button-height)] items-center justify-between gap-[var(--layout-content-gap)] border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
           <div className="min-w-0">
-            <div className="truncate text-ui-large font-bold text-[var(--color-text-main)]">{camera.id} - {camera.name} - 视频诊断</div>
+            <div className="truncate text-ui-large font-bold text-[var(--color-text-main)]">{camera.id} - {camera.name} - 根因诊断</div>
           </div>
           <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
             <button type="button" onClick={handleRun} disabled={running} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)] disabled:opacity-60">
@@ -1141,16 +1213,7 @@ function VideoDiagnosisView({ camera, onClose }) {
                           {step.index === 4 && (running || diagnosis) && (
                             <>
                               <InferenceProgress progress={inferenceProgress} />
-                              {diagnosis && (
-                                <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
-                                  <div className="grid grid-cols-3 gap-[var(--layout-content-gap)] text-ui-medium">
-                                    <InfoLine label="异常类型" value={diagnosis.abnormal_type || diagnosis.business_status} />
-                                    <InfoLine label="根因位置" value={diagnosis.root_cause_node || "无"} wrap />
-                                    <InfoLine label="核心指标" value={diagnosis.root_cause_metric} wrap />
-                                  </div>
-                                  <div className="mt-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-main)]">{diagnosis.conclusion}</div>
-                                </div>
-                              )}
+                              {diagnosis && <RootCauseResultCard diagnosis={diagnosis} />}
                             </>
                           )}
                         </DiagnosisStep>
@@ -1517,7 +1580,7 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
   );
 }
 
-export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
+export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail }) {
   const [activeTab, setActiveTab] = useState("camera");
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1527,15 +1590,32 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   const [streams, setStreams] = useState([]);
   const [detail, setDetail] = useState(null);
   const [diagnosisCamera, setDiagnosisCamera] = useState(null);
+  const [diagnosisFromExternal, setDiagnosisFromExternal] = useState(false);
   const [formState, setFormState] = useState(null);
+  const [scopeMetrics, setScopeMetrics] = useState(null);
 
   const regionCode = focusTarget?.nodeType === "region" ? focusTarget.regionCode : "";
   const cameraId = focusTarget?.nodeType === "camera" ? focusTarget.cameraId : "";
+  const statisticsScopeParams = useMemo(() => buildStatisticsScopeParams(focusTarget), [focusTarget]);
+  const customFolderCameraIds = useMemo(
+    () =>
+      focusTarget?.nodeType === "custom_folder"
+        ? new Set(
+            (focusTarget.children || [])
+              .map((camera) => camera.cameraId || camera.camera_id || camera.id?.replace(/^camera-/, ""))
+              .filter(Boolean)
+          )
+        : new Set(),
+    [focusTarget]
+  );
 
   const focusedCameras = useMemo(() => {
     if (cameraId) return cameras.filter((camera) => camera.id === cameraId);
+    if (focusTarget?.nodeType === "custom_folder") {
+      return cameras.filter((camera) => customFolderCameraIds.has(camera.id));
+    }
     return cameras;
-  }, [cameras, cameraId]);
+  }, [cameras, cameraId, customFolderCameraIds, focusTarget?.nodeType]);
 
   const focusedServerIds = useMemo(
     () => new Set(focusedCameras.map((camera) => camera.server_id).filter(Boolean)),
@@ -1543,11 +1623,11 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   );
 
   const focusedServers = useMemo(() => {
-    if (cameraId || regionCode) {
+    if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
       return servers.filter((server) => focusedServerIds.has(server.id));
     }
     return servers;
-  }, [servers, focusedServerIds, cameraId, regionCode]);
+  }, [servers, focusedServerIds, cameraId, regionCode, focusTarget?.nodeType]);
 
   const focusedCameraIds = useMemo(
     () => new Set(focusedCameras.map((camera) => camera.id)),
@@ -1555,11 +1635,11 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   );
 
   const focusedStreams = useMemo(() => {
-    if (cameraId || regionCode) {
+    if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
       return streams.filter((stream) => focusedCameraIds.has(stream.camera_id));
     }
     return streams;
-  }, [streams, focusedCameraIds, cameraId, regionCode]);
+  }, [streams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
 
   const shownCameras = useMemo(
     () => filterByKeyword(focusedCameras, keyword, ["id", "name", "ip", "town_name", "server_id"]),
@@ -1602,6 +1682,23 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   }, [regionCode, cameraId]);
 
   useEffect(() => {
+    let cancelled = false;
+    getStatisticsOverview(statisticsScopeParams)
+      .then((overview) => {
+        if (!cancelled) setScopeMetrics(overview);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("Failed to load diagnosis scope metrics:", err);
+          setScopeMetrics(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [statisticsScopeParams.camera_id, statisticsScopeParams.camera_ids, statisticsScopeParams.region_code]);
+
+  useEffect(() => {
     if (cameraId) setActiveTab("camera");
   }, [cameraId]);
 
@@ -1612,9 +1709,10 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
 
     setActiveTab("camera");
 
-    if (focusTarget?.openDiagnosis || diagnosisCamera) {
+    if (focusTarget?.openDiagnosis) {
       setDetail(null);
       setDiagnosisCamera(camera);
+      setDiagnosisFromExternal(Boolean(focusTarget?.returnTab));
       return;
     }
 
@@ -1627,7 +1725,15 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraId, cameras, focusTarget?.version, diagnosisCamera]);
+  }, [cameraId, cameras, focusTarget?.version]);
+
+  useEffect(() => {
+    setDetail(null);
+    setDiagnosisCamera(null);
+    setDiagnosisFromExternal(false);
+    setFormState(null);
+    setActiveTab("camera");
+  }, [resetVersion]);
 
   const closeDetail = () => {
     const shouldReturn = detail?.fromExternal;
@@ -1640,20 +1746,34 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   const openDiagnosis = (camera) => {
     setDetail(null);
     setDiagnosisCamera(camera);
+    setDiagnosisFromExternal(false);
   };
 
   const closeDiagnosis = () => {
+    const shouldReturn = diagnosisFromExternal;
     setDiagnosisCamera(null);
+    setDiagnosisFromExternal(false);
     setDetail(null);
+    if (shouldReturn) {
+      onCloseExternalDetail?.();
+    }
   };
 
-  const onlineCameraCount = focusedCameras.filter((item) => item.status === "online").length;
-  const onlineServerCount = focusedServers.filter((item) => item.status === "normal").length;
-  const connectedStreamCount = focusedStreams.filter((item) => item.is_connected && !item.is_fault).length;
+  const metricCameraValue = scopeMetrics
+    ? formatStatusMetricValue(scopeMetrics.device_status?.cameras, "台")
+    : `${focusedCameras.filter((item) => item.status !== "offline").length}/${focusedCameras.length} 台`;
+  const metricServerValue = scopeMetrics
+    ? formatStatusMetricValue(scopeMetrics.device_status?.servers, "台", "normal")
+    : `${focusedServers.filter((item) => item.status === "normal").length}/${focusedServers.length} 台`;
+  const metricStreamValue = scopeMetrics
+    ? formatStatusMetricValue(scopeMetrics.device_status?.streams, "条")
+    : `${focusedStreams.filter((item) => item.is_connected).length}/${focusedStreams.length} 条`;
 
   const scopeText = focusTarget
     ? focusTarget.nodeType === "camera"
       ? `当前摄像机：${focusTarget.name}`
+      : focusTarget.nodeType === "custom_folder"
+      ? `当前分区：${focusTarget.name}`
       : `当前行政区：${focusTarget.name}`
     : "当前范围：全网设备";
 
@@ -1853,9 +1973,9 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
   return (
     <main className="flex min-w-0 flex-1 flex-col gap-[var(--layout-content-gap)] bg-[var(--color-page-bg)] p-[var(--layout-content-padding)] transition-colors">
       <section className="grid grid-cols-3 gap-[var(--layout-content-gap)]">
-        <MetricCard icon={Camera} label="摄像机（在线/总数）" value={`${onlineCameraCount}/${focusedCameras.length} 台`} />
-        <MetricCard icon={Server} label="服务器（在线/总数）" value={`${onlineServerCount}/${focusedServers.length} 台`} />
-        <MetricCard icon={Link2} label="流链路（连通/总数）" value={`${connectedStreamCount}/${focusedStreams.length} 条`} />
+        <MetricCard icon={Camera} label="摄像机（在线/总数）" value={metricCameraValue} />
+        <MetricCard icon={Server} label="服务器（在线/总数）" value={metricServerValue} />
+        <MetricCard icon={Link2} label="流链路（连通/总数）" value={metricStreamValue} />
       </section>
 
       <section className="flex min-h-0 flex-1 flex-col gap-[var(--layout-content-gap)] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
@@ -1887,6 +2007,7 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
                 onClick={() => {
                   setDetail(null);
                   setDiagnosisCamera(null);
+                  setDiagnosisFromExternal(false);
                   setActiveTab(key);
                 }}
                 className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] whitespace-nowrap rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
@@ -1923,7 +2044,7 @@ export default function DeviceManage({ focusTarget, onCloseExternalDetail }) {
             正在加载设备数据
           </div>
         ) : activeTab === "camera" ? (
-          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} />
+          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} onDiagnose={openDiagnosis} />
         ) : activeTab === "server" ? (
           <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} />
         ) : (

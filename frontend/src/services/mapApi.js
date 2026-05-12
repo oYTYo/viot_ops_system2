@@ -16,6 +16,7 @@ export async function getMapRegionCameras(regionCode, statusFilter = "all") {
     params: {
       region_code: regionCode,
       status_filter: statusFilter,
+      include_fake: false,
       limit: 5000,
     },
   });
