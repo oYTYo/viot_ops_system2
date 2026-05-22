@@ -94,13 +94,13 @@ function StatusGroup({ title, icon: Icon, data, offlineLabel = "离线" }) {
 
 function LatexFormula({ source }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)] [.font-scale-large_&]:flex-nowrap [.font-scale-large_&]:gap-x-[var(--layout-reset-tooltip-gap)] [.font-scale-large_&]:gap-y-0 [.font-scale-large_&]:overflow-visible" title={source}>
+    <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)] [.font-scale-small_&]:flex-nowrap [.font-scale-small_&]:gap-x-[var(--layout-reset-tooltip-gap)] [.font-scale-small_&]:gap-y-0 [.font-scale-small_&]:overflow-visible" title={source}>
       <span className="shrink-0 whitespace-nowrap">全局健康度 = 100 -</span>
       <span className="inline-flex shrink-0 flex-col items-center align-middle leading-none" title={source}>
-        <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)] [.font-scale-large_&]:px-[var(--layout-reset-padding-x)]">
+        <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)] [.font-scale-small_&]:px-[var(--layout-reset-padding-x)]">
           Σ 每条链路权重 × 异常分数
         </span>
-        <span className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-tree-gap)] [.font-scale-large_&]:px-[var(--layout-reset-padding-x)]">
+        <span className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-tree-gap)] [.font-scale-small_&]:px-[var(--layout-reset-padding-x)]">
           Σ 每条链路权重
         </span>
       </span>

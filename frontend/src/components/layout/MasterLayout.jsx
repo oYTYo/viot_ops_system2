@@ -380,7 +380,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
     <header className="h-[var(--layout-topbar-height)] shrink-0 border-b border-[var(--color-panel-border)] bg-[var(--color-topbar-bg)] px-[var(--layout-topbar-padding-x)] shadow-[var(--shadow-panel)] transition-colors">
       <div className="flex h-full items-center justify-between gap-[var(--layout-topbar-gap)]">
 
-        <div className="flex min-w-[var(--layout-title-width)] items-center gap-[var(--layout-title-gap)] text-app-title font-bold leading-none tracking-tight text-white">
+        <div className="flex min-w-[var(--layout-title-width-aligned)] shrink-0 items-center gap-[var(--layout-title-gap)] border-r border-[var(--color-topbar-divider)] pr-[var(--layout-topbar-gap)] overflow-hidden text-app-title font-bold leading-none tracking-tight text-white">
           <Network
             size="var(--icon-logo)"
             className={`shrink-0 ${darkMode ? "text-[var(--color-accent)]" : "text-white"}`}
@@ -395,7 +395,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
               <button
                 key={key}
                 onClick={() => onTabChange(key)}
-                className={`flex min-h-[var(--layout-tab-height)] items-center gap-[var(--layout-tab-inner-gap)] rounded-[var(--layout-radius-lg)] px-[var(--layout-tab-padding-x)] py-[var(--layout-tab-padding-y)] text-ui-large font-medium transition-colors ${
+                className={`flex min-h-[var(--layout-tab-height)] items-center gap-[var(--layout-tab-inner-gap)] rounded-[var(--layout-radius-lg)] px-[var(--layout-tab-padding-x)] py-[var(--layout-tab-padding-y)] text-ui-large font-bold transition-colors ${
                   isActive
                     ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm"
                     : "text-[var(--color-topbar-text)] hover:bg-[var(--color-topbar-hover-bg)] hover:text-[var(--color-topbar-hover-text)]"
@@ -1763,7 +1763,7 @@ export default function VioTMasterLayout() {
 
   return (
     <div
-      className={`${largeFont ? "font-scale-large" : "font-scale-normal"} ${
+      className={`${largeFont ? "font-scale-small" : "font-scale-normal"} ${
         darkMode ? "theme-dark" : "theme-light"
       } flex h-screen flex-col overflow-hidden bg-[var(--color-page-bg)] text-[var(--color-text-main)] transition-colors`}
     >
