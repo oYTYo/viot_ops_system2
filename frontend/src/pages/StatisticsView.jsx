@@ -43,7 +43,7 @@ function Panel({ title, subtitle, icon: Icon, children, action = null, className
   );
 }
 
-function StatusGroup({ title, icon: Icon, data, offlineLabel = "离线" }) {
+function StatusGroup({ title, icon: Icon, data, offlineLabel = "离线", onTitleClick, onStatusClick }) {
   const total = data?.total || 0;
   const rows = ["normal", "fault", "offline"].map((key) => ({
     key,
@@ -56,9 +56,12 @@ function StatusGroup({ title, icon: Icon, data, offlineLabel = "离线" }) {
   return (
     <div className="min-w-0 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-padding)]">
       <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
-        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+        <div 
+          className={`flex min-w-0 items-center gap-[var(--layout-search-gap)] ${onTitleClick ? "cursor-pointer hover:opacity-80" : ""}`}
+          onClick={onTitleClick}
+        >
           <Icon size="var(--icon-topbar)" className="shrink-0 text-[var(--color-accent)]" />
-          <span className="truncate text-ui-medium font-bold text-[var(--color-text-main)]">{title}</span>
+          <span className="truncate text-ui-medium font-bold text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors">{title}</span>
         </div>
         <span className="shrink-0 text-ui-large font-bold text-[var(--color-accent)]">{total}</span>
       </div>
@@ -66,7 +69,11 @@ function StatusGroup({ title, icon: Icon, data, offlineLabel = "离线" }) {
         {rows.map((row) => {
           const RowIcon = row.icon;
           return (
-            <span key={row.key} className="flex min-w-0 items-center justify-center gap-[var(--layout-reset-tooltip-gap)] text-ui-medium text-[var(--color-text-main)]">
+            <span 
+              key={row.key} 
+              className={`flex min-w-0 items-center justify-center gap-[var(--layout-reset-tooltip-gap)] text-ui-medium text-[var(--color-text-main)] ${onStatusClick ? "cursor-pointer hover:text-[var(--color-accent)] transition-colors" : ""}`}
+              onClick={() => onStatusClick && onStatusClick(row.key)}
+            >
               <RowIcon size="var(--icon-bottom)" style={{ color: row.color }} />
               <span className="whitespace-nowrap">{row.label}</span>
               <span className="font-semibold">{row.value}</span>
@@ -108,25 +115,52 @@ function LatexFormula({ source }) {
   );
 }
 
-function HealthGauge({ value, formula, formulaLatex, sampleCount }) {
+function HealthGauge({ value, formula, formulaLatex, sampleCount, safeDays = 42 }) {
   const radius = 44;
   const circumference = 2 * Math.PI * radius;
   const dash = circumference * (Number(value || 0) / 100);
-  const color = value >= 85 ? "var(--color-accent)" : value >= 65 ? "#f59e0b" : "var(--color-error-text)";
+  // 更新分级阈值为 90 和 70
+  const color = value >= 90 ? "var(--color-accent)" : value >= 70 ? "#f59e0b" : "var(--color-error-text)";
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-[var(--layout-content-padding)]">
-      <div className="relative h-[calc(var(--font-large)*4.45)] w-[calc(var(--font-large)*4.45)] shrink-0 overflow-visible">
-        <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-125 overflow-visible">
-          <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-control-bg)" strokeWidth="12" />
-          <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
-        </svg>
-        <div className="absolute inset-0 grid scale-115 place-items-center text-center">
-          <div className="text-ui-large font-bold leading-none" style={{ color }}>{formatNumber(value, 1)}</div>
+    <div className="flex min-w-0 flex-col items-center justify-center gap-[calc(var(--layout-content-gap)*2)] pt-[var(--layout-search-padding-y)]">
+      {/* 上半部分：仪表盘与图例 */}
+      <div className="flex min-w-0 items-center justify-center gap-[calc(var(--layout-content-padding)*2)]">
+        {/* 仪表盘及悬浮公式 */}
+        <div className="group relative h-[calc(var(--font-large)*4.45)] w-[calc(var(--font-large)*4.45)] shrink-0 overflow-visible">
+          <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-125 overflow-visible">
+            <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-control-bg)" strokeWidth="12" />
+            <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
+          </svg>
+          <div className="absolute inset-0 grid scale-115 place-items-center text-center">
+            <div className="text-ui-large font-bold leading-none" style={{ color }}>{formatNumber(value, 1)}</div>
+          </div>
+          {/* Hover 悬浮显示公式 */}
+          <div className="pointer-events-none absolute left-0 top-[110%] z-[9999] w-max opacity-0 transition-opacity group-hover:opacity-100 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+            <LatexFormula source={formulaLatex} />
+          </div>
+        </div>
+
+        {/* 右侧：色彩分级图例 */}
+        <div className="flex flex-col gap-[var(--layout-search-gap)]">
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-accent)]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度90-100">健康</span>
+          </div>
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[#f59e0b]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度70-90">良好</span>
+          </div>
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-error-text)]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度低于70">危险</span>
+          </div>
         </div>
       </div>
-      <div className="min-w-0 pl-[var(--layout-search-gap)]">
-        <LatexFormula source={formulaLatex} />
+
+      {/* 下半部分：运行天数文案 */}
+      <div className="text-center text-ui-medium text-[var(--color-text-muted)]">
+        已保障系统无重大危险持续 <span className="mx-[var(--layout-reset-tooltip-gap)] font-bold text-[var(--color-accent)]">{safeDays}</span> 天
       </div>
     </div>
   );
@@ -296,7 +330,7 @@ function buildScopeParams(focusTarget) {
   return {};
 }
 
-export default function StatisticsView({ focusTarget }) {
+export default function StatisticsView({ focusTarget, onNavigateToDevice }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -357,15 +391,36 @@ export default function StatisticsView({ focusTarget }) {
 
         <Panel title="资源状态统计" icon={Activity}>
           <div className="grid min-w-0 gap-[var(--layout-content-gap)] xl:grid-cols-3">
-            <StatusGroup title="摄像机设备" icon={Video} data={data?.device_status?.cameras} offlineLabel="离线" />
-            <StatusGroup title="流链路" icon={TrendingUp} data={data?.device_status?.streams} offlineLabel="断连" />
-            <StatusGroup title="服务器" icon={Server} data={data?.device_status?.servers} offlineLabel="离线" />
+            <StatusGroup 
+              title="摄像机设备" 
+              icon={Video} 
+              data={data?.device_status?.cameras} 
+              offlineLabel="离线"
+              onTitleClick={() => onNavigateToDevice?.('camera')}
+              onStatusClick={(status) => onNavigateToDevice?.('camera', status)}
+            />
+            <StatusGroup 
+              title="流链路" 
+              icon={TrendingUp} 
+              data={data?.device_status?.streams} 
+              offlineLabel="断连" 
+              onTitleClick={() => onNavigateToDevice?.('stream')}
+              onStatusClick={(status) => onNavigateToDevice?.('stream', status)}
+            />
+            <StatusGroup 
+              title="服务器" 
+              icon={Server} 
+              data={data?.device_status?.servers} 
+              offlineLabel="离线" 
+              onTitleClick={() => onNavigateToDevice?.('server')}
+              onStatusClick={(status) => onNavigateToDevice?.('server', status)}
+            />
           </div>
         </Panel>
 
         <div className="grid min-w-0 items-stretch gap-[var(--layout-content-gap)] xl:grid-cols-[minmax(0,0.670fr)_minmax(0,1.325fr)]">
           <Panel title="黄金指标 - 流链路全局健康度" icon={Gauge}>
-            <HealthGauge value={data?.golden_metrics?.global_stream_health || 0} formula={data?.golden_metrics?.formula || ""} formulaLatex={data?.golden_metrics?.formula_latex || ""} sampleCount={data?.golden_metrics?.sample_count || 0} />
+            <HealthGauge value={data?.golden_metrics?.global_stream_health || 0} formula={data?.golden_metrics?.formula || ""} formulaLatex={data?.golden_metrics?.formula_latex || ""} sampleCount={data?.golden_metrics?.sample_count || 0} safeDays={data?.golden_metrics?.safe_days || 42} />
           </Panel>
           <Panel title="画面异常类型统计" icon={AlertTriangle}>
             <KqiBar items={data?.kqi_degradation || []} />

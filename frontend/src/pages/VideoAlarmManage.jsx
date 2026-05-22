@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bell, CheckCircle2, Loader2, Search, Settings2, X, Zap } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap } from "lucide-react";
 import { getDeviceCameras, getDeviceStreams } from "../services/deviceApi";
 import { getCameraPreview } from "../services/videoApi";
 
@@ -525,7 +525,47 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
   );
 }
 
-function InlineAlgorithmConfig({ scopeName, algorithm, setAlgorithm, confirmStrategy, setConfirmStrategy, thresholds, setThresholds }) {
+function PollingConfigPanel({ scopeName, confirmStrategy, setConfirmStrategy, onClose }) {
+  return (
+    <div className="col-span-2 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+      <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+        <div className="flex items-center gap-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]">
+          <RotateCw size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
+          轮巡配置
+        </div>
+        <button type="button" onClick={onClose} className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"><X size="var(--icon-topbar)" /></button>
+      </header>
+      <div className="grid grid-cols-3 gap-[var(--layout-content-gap)] p-[var(--layout-content-padding)]">
+        <label className="min-w-0">
+          <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">轮巡周期</span>
+          <select defaultValue="60" className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
+            <option value="10">每 10 秒</option>
+            <option value="30">每 30 秒</option>
+            <option value="60">每 1 分钟</option>
+            <option value="300">每 5 分钟</option>
+          </select>
+        </label>
+        <label className="min-w-0">
+          <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">轮巡范围</span>
+          <select defaultValue="current" className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
+            <option value="current">{scopeName}</option>
+            <option value="fault">仅异常/离线摄像机</option>
+            <option value="all">全部区域</option>
+          </select>
+        </label>
+        <label className="min-w-0">
+          <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">确认策略</span>
+          <select value={confirmStrategy} onChange={(event) => setConfirmStrategy(event.target.value)} className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
+            <option value="manual">人工确认</option>
+            <option value="auto">自动确认</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function AlgorithmConfigPanel({ algorithm, setAlgorithm, thresholds, setThresholds, onClose }) {
   const [thresholdOpen, setThresholdOpen] = useState(false);
   const [thresholdDraft, setThresholdDraft] = useState(thresholds);
   const algorithms = [
@@ -564,41 +604,17 @@ function InlineAlgorithmConfig({ scopeName, algorithm, setAlgorithm, confirmStra
   }
 
   return (
-    <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
-      <div className="mb-[var(--layout-search-gap)] flex items-center gap-[var(--layout-search-gap)] text-ui-medium font-bold text-[var(--color-text-main)]">
-        <Settings2 size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
-        异常检测算法配置
-      </div>
-      <div className="grid items-end gap-[var(--layout-content-gap)] xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.45fr)_auto]">
-        <div className="grid min-w-0 grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)_minmax(0,0.9fr)] gap-[var(--layout-search-gap)]">
-          <label className="min-w-0">
-            <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">轮巡周期</span>
-            <select defaultValue="60" className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
-              <option value="10">每 10 秒</option>
-              <option value="30">每 30 秒</option>
-              <option value="60">每 1 分钟</option>
-              <option value="300">每 5 分钟</option>
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">轮巡范围</span>
-            <select defaultValue="current" className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
-              <option value="current">{scopeName}</option>
-              <option value="fault">仅异常/离线摄像机</option>
-              <option value="all">全部区域</option>
-            </select>
-          </label>
-          <label className="min-w-0">
-            <span className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]">确认策略</span>
-            <select value={confirmStrategy} onChange={(event) => setConfirmStrategy(event.target.value)} className="h-[var(--layout-search-height)] w-full rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium outline-none">
-              <option value="manual">人工确认</option>
-              <option value="auto">自动确认</option>
-            </select>
-          </label>
+    <div className="col-span-2 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+      <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+        <div className="flex items-center gap-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]">
+          <Settings2 size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
+          异常检测算法配置
         </div>
-
-        <div className="min-w-0">
-          <div className="mb-[var(--layout-tree-gap)] block w-[calc(100%+10rem+var(--layout-content-gap))] truncate text-ui-small leading-none text-[var(--color-text-muted)]" title={descriptions[algorithm]}>
+        <button type="button" onClick={onClose} className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"><X size="var(--icon-topbar)" /></button>
+      </header>
+      <div className="flex items-end gap-[var(--layout-content-gap)] p-[var(--layout-content-padding)]">
+        <div className="min-w-0 flex-1">
+          <div className="mb-[var(--layout-tree-gap)] block truncate text-ui-small leading-none text-[var(--color-text-muted)]" title={descriptions[algorithm]}>
             {descriptions[algorithm]}
           </div>
           <div className="grid h-[var(--layout-search-height)] grid-cols-4 items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] bg-[var(--color-control-bg)] px-[var(--layout-tree-gap)]">
@@ -618,7 +634,7 @@ function InlineAlgorithmConfig({ scopeName, algorithm, setAlgorithm, confirmStra
           type="button"
           disabled={algorithm !== "rule"}
           onClick={() => setThresholdOpen(true)}
-          className="h-[var(--layout-search-height)] self-end rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-accent)] enabled:hover:bg-[var(--color-hover-bg)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
+          className="h-[var(--layout-search-height)] shrink-0 rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] text-ui-small text-[var(--color-accent)] enabled:hover:bg-[var(--color-hover-bg)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]"
         >
           配置异常阈值
         </button>
@@ -669,11 +685,11 @@ function InlineAlgorithmConfig({ scopeName, algorithm, setAlgorithm, confirmStra
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
-export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpenCameraDiagnosis }) {
+export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpenCameraDiagnosis, showAlarmConfig, onCloseAlarmConfig, showPollingConfig, onClosePollingConfig }) {
   const [cameras, setCameras] = useState([]);
   const [streams, setStreams] = useState([]);
   const [keyword, setKeyword] = useState("");
@@ -789,6 +805,30 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
       </section>
 
       <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-[var(--layout-content-gap)]">
+        <aside className="min-h-0 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)]">
+          {selectedAlarm ? (
+            <div className="space-y-[var(--layout-content-gap)]">
+              <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
+                <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+                  <Bell size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
+                  <h2 className="max-w-[min(46rem,52vw)] truncate text-ui-large font-bold text-[var(--color-text-main)]" title={selectedAlarm.camera?.name}>{selectedAlarm.camera?.name || selectedAlarm.camera?.id}</h2>
+                </div>
+                <button type="button" onClick={() => onOpenCameraDiagnosis?.(selectedAlarm.camera)} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)]">
+                  <Zap size="var(--icon-bottom)" /> 根因诊断
+                </button>
+              </div>
+              <AlarmPreview alarm={selectedAlarm} />
+              <div className="grid grid-cols-2 gap-[var(--layout-content-gap)] text-ui-medium">
+                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">摄像机状态：{cameraStatusText(selectedAlarm.camera?.status)}</div>
+                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">告警状态：{selectedAlarm.status}</div>
+              </div>
+              <MetricTrendChart alarm={selectedAlarm} algorithm={algorithm} thresholds={thresholds} />
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-ui-medium text-[var(--color-text-muted)]"><CheckCircle2 size="var(--icon-topbar)" className="mr-[var(--layout-search-gap)] text-[var(--color-accent)]" /> 当前范围暂无告警</div>
+          )}
+        </aside>
+
         <div className="min-h-0 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
           {loading ? (
             <div className="flex h-full items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-muted)]"><Loader2 size="var(--icon-search)" className="animate-spin" /> 正在加载告警</div>
@@ -822,40 +862,25 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
           )}
         </div>
 
-        <aside className="min-h-0 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)]">
-          {selectedAlarm ? (
-            <div className="space-y-[var(--layout-content-gap)]">
-              <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
-                <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
-                  <Bell size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
-                  <h2 className="max-w-[min(46rem,52vw)] truncate text-ui-large font-bold text-[var(--color-text-main)]" title={selectedAlarm.camera?.name}>{selectedAlarm.camera?.name || selectedAlarm.camera?.id}</h2>
-                </div>
-                <button type="button" onClick={() => onOpenCameraDiagnosis?.(selectedAlarm.camera)} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)]">
-                  <Zap size="var(--icon-bottom)" /> 根因诊断
-                </button>
-              </div>
-              <AlarmPreview alarm={selectedAlarm} />
-              <div className="grid grid-cols-2 gap-[var(--layout-content-gap)] text-ui-medium">
-                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">摄像机状态：{cameraStatusText(selectedAlarm.camera?.status)}</div>
-                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">告警状态：{selectedAlarm.status}</div>
-              </div>
-              <MetricTrendChart alarm={selectedAlarm} algorithm={algorithm} thresholds={thresholds} />
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-ui-medium text-[var(--color-text-muted)]"><CheckCircle2 size="var(--icon-topbar)" className="mr-[var(--layout-search-gap)] text-[var(--color-accent)]" /> 当前范围暂无告警</div>
-          )}
-        </aside>
-      </section>
+        {showPollingConfig && (
+          <PollingConfigPanel
+            scopeName={scopeText.replace(/^当前范围：/, "")}
+            confirmStrategy={confirmStrategy}
+            setConfirmStrategy={setConfirmStrategy}
+            onClose={onClosePollingConfig}
+          />
+        )}
 
-      <InlineAlgorithmConfig
-        scopeName={scopeText.replace(/^当前范围：/, "")}
-        algorithm={algorithm}
-        setAlgorithm={setAlgorithm}
-        confirmStrategy={confirmStrategy}
-        setConfirmStrategy={setConfirmStrategy}
-        thresholds={thresholds}
-        setThresholds={setThresholds}
-      />
+        {showAlarmConfig && (
+          <AlgorithmConfigPanel
+            algorithm={algorithm}
+            setAlgorithm={setAlgorithm}
+            thresholds={thresholds}
+            setThresholds={setThresholds}
+            onClose={onCloseAlarmConfig}
+          />
+        )}
+      </section>
     </main>
   );
 }

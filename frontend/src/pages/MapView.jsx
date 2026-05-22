@@ -190,7 +190,7 @@ const statusMeta = {
   offline: { label: "离线/断连", color: "var(--color-text-muted)", icon: WifiOff },
 };
 
-function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线" }) {
+function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线", onTitleClick, onStatusClick }) {
   const normal = Number(data?.normal || 0);
   const fault = Number(data?.fault || 0);
   const offline = Number(data?.offline || 0);
@@ -206,9 +206,12 @@ function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线" }) {
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
-        <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+        <div 
+          className={`flex min-w-0 items-center gap-[var(--layout-search-gap)] ${onTitleClick ? "cursor-pointer hover:opacity-80" : ""}`}
+          onClick={onTitleClick}
+        >
           <Icon size="var(--icon-topbar)" className="shrink-0 text-[var(--color-accent)]" />
-          <span className="truncate text-ui-medium font-bold text-[var(--color-text-main)]">{title}</span>
+          <span className="truncate text-ui-medium font-bold text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors">{title}</span>
         </div>
         <span className="shrink-0 text-ui-large font-bold text-[var(--color-accent)]">{total}</span>
       </div>
@@ -216,7 +219,11 @@ function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线" }) {
         {rows.map((row) => {
           const RowIcon = row.icon;
           return (
-            <span key={row.key} className="flex min-w-0 items-center justify-center gap-[var(--layout-reset-tooltip-gap)] text-ui-medium text-[var(--color-text-main)]">
+            <span 
+              key={row.key} 
+              className={`flex min-w-0 items-center justify-center gap-[var(--layout-reset-tooltip-gap)] text-ui-medium text-[var(--color-text-main)] ${onStatusClick ? "cursor-pointer hover:text-[var(--color-accent)] transition-colors" : ""}`}
+              onClick={() => onStatusClick && onStatusClick(row.key)}
+            >
               <RowIcon size="var(--icon-bottom)" style={{ color: row.color }} />
               <span className="whitespace-nowrap">{row.label}</span>
               <span className="font-semibold">{row.value}</span>
@@ -265,31 +272,60 @@ function LatexFormulaMini() {
   );
 }
 
-function HealthGaugeMini({ value }) {
+function HealthGaugeMini({ value, safeDays = 42 }) {
   const radius = 44;
   const circumference = 2 * Math.PI * radius;
   const numeric = Math.max(0, Math.min(Number(value || 0), 100));
   const dash = circumference * (numeric / 100);
-  const color = numeric >= 85 ? "var(--color-accent)" : numeric >= 65 ? "#f59e0b" : "var(--color-error-text)";
+  // 更新分级阈值为 90 和 70
+  const color = numeric >= 90 ? "var(--color-accent)" : numeric >= 70 ? "#f59e0b" : "var(--color-error-text)";
 
   return (
-    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-[var(--layout-content-gap)]">
-      <div className="relative h-[calc(var(--font-large)*4.2)] w-[calc(var(--font-large)*4.2)] shrink-0 overflow-visible">
-        <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-110 overflow-visible">
-          <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-panel-bg)" strokeWidth="12" />
-          <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
-        </svg>
-        <div className="absolute inset-0 grid place-items-center">
-          <div className="font-mono text-ui-large font-bold leading-none" style={{ color }}>{numeric.toFixed(1)}</div>
+    <div className="flex min-w-0 flex-col items-center justify-center gap-[calc(var(--layout-content-gap)*2)] pt-[var(--layout-search-padding-y)]">
+      {/* 上半部分：仪表盘与图例 */}
+      <div className="flex min-w-0 items-center justify-center gap-[calc(var(--layout-content-padding)*2)]">
+        {/* 仪表盘及悬浮公式 */}
+        <div className="group relative h-[calc(var(--font-large)*4.45)] w-[calc(var(--font-large)*4.45)] shrink-0 overflow-visible">
+          <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-125 overflow-visible">
+            <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-control-bg)" strokeWidth="12" />
+            <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
+          </svg>
+          <div className="absolute inset-0 grid scale-115 place-items-center text-center">
+            <div className="text-ui-large font-bold leading-none" style={{ color }}>{numeric.toFixed(1)}</div>
+          </div>
+          {/* Hover 悬浮显示公式 */}
+          <div className="pointer-events-none absolute left-19/20 top-[110%] z-[9999] w-max -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+            <LatexFormulaMini />
+          </div>
+        </div>
+
+        {/* 右侧：色彩分级图例 */}
+        <div className="flex flex-col gap-[var(--layout-search-gap)]">
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-accent)]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度90-100">健康</span>
+          </div>
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[#f59e0b]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度70-90">良好</span>
+          </div>
+          <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
+            <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-error-text)]" />
+            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度低于70">危险</span>
+          </div>
         </div>
       </div>
-      <LatexFormulaMini />
+
+      {/* 下半部分：运行天数文案 */}
+      <div className="text-center text-ui-medium text-[var(--color-text-muted)]">
+        已保障系统无重大危险持续 <span className="mx-[var(--layout-reset-tooltip-gap)] font-bold text-[var(--color-accent)]">{safeDays}</span> 天
+      </div>
     </div>
   );
 }
 
 function formatWeekdayLabel(value) {
-  const weekdayLabels = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."];
+  const weekdayLabels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const match = String(value || "").match(/^(\d{2})-(\d{2})$/);
 
   if (!match) return String(value || "");
@@ -341,7 +377,7 @@ function MiniLineChart({ data = [], maxCount }) {
   );
 }
 
-function OperationMetricsPanel({ focusTarget }) {
+function OperationMetricsPanel({ focusTarget, onNavigateToDevice }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -382,13 +418,32 @@ function OperationMetricsPanel({ focusTarget }) {
       {loading && <Loader2 size="var(--icon-bottom)" className="absolute right-[var(--layout-content-padding)] top-[var(--layout-content-padding)] animate-spin text-[var(--color-accent)]" />}
       <DashboardSection title="资源状态统计">
         <div className="flex min-h-[calc(var(--font-large)*13)] flex-col justify-between gap-[var(--layout-content-gap)]">
-          <StatusMetricBar title="摄像机" icon={Camera} data={data?.device_status?.cameras} />
-          <StatusMetricBar title="流链路" icon={TrendingUp} data={data?.device_status?.streams} offlineLabel="断连" />
-          <StatusMetricBar title="服务器" icon={Server} data={data?.device_status?.servers} />
+          <StatusMetricBar 
+            title="摄像机" 
+            icon={Camera} 
+            data={data?.device_status?.cameras} 
+            onTitleClick={() => onNavigateToDevice?.('camera')}
+            onStatusClick={(status) => onNavigateToDevice?.('camera', status)}
+          />
+          <StatusMetricBar 
+            title="流链路" 
+            icon={TrendingUp} 
+            data={data?.device_status?.streams} 
+            offlineLabel="断连" 
+            onTitleClick={() => onNavigateToDevice?.('stream')}
+            onStatusClick={(status) => onNavigateToDevice?.('stream', status)}
+          />
+          <StatusMetricBar 
+            title="服务器" 
+            icon={Server} 
+            data={data?.device_status?.servers} 
+            onTitleClick={() => onNavigateToDevice?.('server')}
+            onStatusClick={(status) => onNavigateToDevice?.('server', status)}
+          />
         </div>
       </DashboardSection>
       <DashboardSection title="黄金指标：流链路全局健康度">
-        <HealthGaugeMini value={health} />
+        <HealthGaugeMini value={health} safeDays={data?.golden_metrics?.safe_days || 42} />
       </DashboardSection>
       <DashboardSection title="异常告警统计">
         <MiniLineChart data={data?.anomaly_trend || []} maxCount={cameraTotal} />
@@ -397,7 +452,7 @@ function OperationMetricsPanel({ focusTarget }) {
   );
 }
 
-export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onOpenCameraDiagnosis }) {
+export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onOpenCameraDiagnosis, onNavigateToDevice }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const amapRef = useRef(null);
@@ -821,7 +876,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
           <span>县级显示摄像机</span>
         </div>
       </section>
-      <OperationMetricsPanel focusTarget={focusTarget} />
+      <OperationMetricsPanel focusTarget={focusTarget} onNavigateToDevice={onNavigateToDevice} />
     </main>
   );
 }

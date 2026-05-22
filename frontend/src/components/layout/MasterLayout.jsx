@@ -20,6 +20,9 @@ import {
   Loader2,
   AlertCircle,
   Network,
+  Settings2,
+  X,
+  RotateCw,
 } from "lucide-react";
 import MapView from "../../pages/MapView";
 import DeviceManage from "../../pages/DeviceManage";
@@ -388,7 +391,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
           <span>视联网智能运维平台</span>
         </div>
 
-        <nav className="flex flex-1 items-center justify-center gap-[var(--layout-tab-gap)]">
+        <nav className="flex flex-1 items-center justify-start gap-[var(--layout-tab-gap)]">
           {tabs.map(({ key, label, icon: Icon }) => {
             const isActive = activeTab === key;
             return (
@@ -1502,13 +1505,18 @@ function ContentPlaceholder({
   onOpenCameraDetail,
   onOpenCameraDiagnosis,
   onCloseExternalDeviceDetail,
+  onNavigateToDevice,
+  showAlarmConfig,
+  onCloseAlarmConfig,
+  showPollingConfig,
+  onClosePollingConfig,
 }) {
   if (activeTab === "map") {
-    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} onOpenCameraDiagnosis={onOpenCameraDiagnosis} />;
+    return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} onOpenCameraDiagnosis={onOpenCameraDiagnosis} onNavigateToDevice={onNavigateToDevice} />;
   }
 
   if (activeTab === "alarm") {
-    return <VideoAlarmManage focusTarget={alarmFocusTarget} resetVersion={alarmResetVersion} onOpenCameraDiagnosis={onOpenCameraDiagnosis} />;
+    return <VideoAlarmManage focusTarget={alarmFocusTarget} resetVersion={alarmResetVersion} onOpenCameraDiagnosis={onOpenCameraDiagnosis} showAlarmConfig={showAlarmConfig} onCloseAlarmConfig={onCloseAlarmConfig} showPollingConfig={showPollingConfig} onClosePollingConfig={onClosePollingConfig} />;
   }
 
   if (activeTab === "device") {
@@ -1516,7 +1524,7 @@ function ContentPlaceholder({
   }
 
   if (activeTab === "stats") {
-    return <StatisticsView focusTarget={statsFocusTarget} />;
+    return <StatisticsView focusTarget={statsFocusTarget} onNavigateToDevice={onNavigateToDevice} />;
   }
 
   const title = tabs.find((tab) => tab.key === activeTab)?.label || "内容";
@@ -1546,6 +1554,8 @@ function BottomBar({
   onResetSidebar,
   onResetAlarms,
   onResetDiagnoses,
+  onOpenAlarmConfig,
+  onOpenPollingConfig,
 }) {
   return (
     <footer className="flex h-[var(--layout-footer-height)] shrink-0 border-t border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-ui-small text-[var(--color-text-muted)] transition-colors">
@@ -1573,7 +1583,7 @@ function BottomBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
-          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses })}
+          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses, onOpenAlarmConfig, onOpenPollingConfig })}
         </div>
       </div>
     </footer>
@@ -1594,10 +1604,20 @@ function getPageBottomHint(activeTab) {
 function getPageBottomActions(activeTab, options = {}) {
   if (activeTab === "alarm") {
     return (
-      <button type="button" onClick={options.onResetAlarms} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
-        <RefreshCw size="var(--icon-bottom)" />
-        刷新告警确认
-      </button>
+      <div className="flex gap-2">
+        <button type="button" onClick={options.onOpenPollingConfig} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+          <RotateCw size="var(--icon-bottom)" />
+          轮巡配置
+        </button>
+        <button type="button" onClick={options.onOpenAlarmConfig} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+          <Settings2 size="var(--icon-bottom)" />
+          算法配置
+        </button>
+        <button type="button" onClick={options.onResetAlarms} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+          <RefreshCw size="var(--icon-bottom)" />
+          刷新告警确认
+        </button>
+      </div>
     );
   }
 
@@ -1637,6 +1657,8 @@ export default function VioTMasterLayout() {
   const [alarmFocusTarget, setAlarmFocusTarget] = useState(null);
   const [alarmResetVersion, setAlarmResetVersion] = useState(0);
   const [statsFocusTarget, setStatsFocusTarget] = useState(null);
+  const [showAlarmConfig, setShowAlarmConfig] = useState(false);
+  const [showPollingConfig, setShowPollingConfig] = useState(false);
   const externalDetailReturnTabRef = useRef("");
   const previewingCameraIds = useMemo(() => new Set(), []);
 
@@ -1712,6 +1734,15 @@ export default function VioTMasterLayout() {
       setDeviceResetVersion((value) => value + 1);
     }
     setActiveTab(key);
+  };
+
+  const handleNavigateToDevice = (tab, status) => {
+    setDeviceFocusTarget({
+      deviceTab: tab,
+      statusFilter: status || 'all',
+      version: Date.now(),
+    });
+    setActiveTab("device");
   };
 
   const handleResetAlarmConfirmations = () => {
@@ -1790,6 +1821,7 @@ export default function VioTMasterLayout() {
           onOpenCameraDetail={(camera) => openCameraDetailFrom(activeTab, camera)}
           onOpenCameraDiagnosis={(camera) => openCameraDiagnosisFrom(activeTab, camera)}
           onCloseExternalDeviceDetail={handleCloseExternalDeviceDetail}
+          onNavigateToDevice={handleNavigateToDevice}
           mapFocusTarget={mapFocusTarget}
           deviceFocusTarget={deviceFocusTarget}
           deviceResetVersion={deviceResetVersion}
@@ -1797,6 +1829,10 @@ export default function VioTMasterLayout() {
           alarmResetVersion={alarmResetVersion}
           statsFocusTarget={statsFocusTarget}
           darkMode={darkMode}
+          showAlarmConfig={showAlarmConfig}
+          onCloseAlarmConfig={() => setShowAlarmConfig(false)}
+          showPollingConfig={showPollingConfig}
+          onClosePollingConfig={() => setShowPollingConfig(false)}
         />
       </div>
 
@@ -1809,6 +1845,8 @@ export default function VioTMasterLayout() {
           setSidebarWidth(null);
           setResetVersion((value) => value + 1);
         }}
+        onOpenAlarmConfig={() => setShowAlarmConfig(true)}
+        onOpenPollingConfig={() => setShowPollingConfig(true)}
       />
     </div>
   );

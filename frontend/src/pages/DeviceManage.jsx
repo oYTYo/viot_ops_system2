@@ -234,6 +234,27 @@ function filterByKeyword(items, keyword, fields) {
   );
 }
 
+const filterByStatus = (items, type, statusFilter) => {
+  if (statusFilter === "all") return items;
+  return items.filter(item => {
+    if (type === "camera") {
+      const mappedStatus = item.status === "online" ? "normal" : item.status;
+      return mappedStatus === statusFilter;
+    }
+    if (type === "server") {
+      const mappedStatus = (item.status === "warning" || item.status === "fault") ? "fault" : item.status;
+      return mappedStatus === statusFilter;
+    }
+    if (type === "stream") {
+      let mappedStatus = "normal";
+      if (!item.is_connected) mappedStatus = "offline";
+      else if (item.is_fault) mappedStatus = "fault";
+      return mappedStatus === statusFilter;
+    }
+    return true;
+  });
+};
+
 function validateRequiredFields(form, fields) {
   const missing = fields.find(({ key }) => !emptyToNull(form[key]));
   return missing ? `请填写${missing.label}` : "";
@@ -1581,7 +1602,8 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
 }
 
 export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail }) {
-  const [activeTab, setActiveTab] = useState("camera");
+  const [activeTab, setActiveTab] = useState(focusTarget?.deviceTab || "camera");
+  const [deviceStatusFilter, setDeviceStatusFilter] = useState(focusTarget?.statusFilter || "all");
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1642,16 +1664,16 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   }, [streams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
 
   const shownCameras = useMemo(
-    () => filterByKeyword(focusedCameras, keyword, ["id", "name", "ip", "town_name", "server_id"]),
-    [focusedCameras, keyword]
+    () => filterByKeyword(filterByStatus(focusedCameras, "camera", deviceStatusFilter), keyword, ["id", "name", "ip", "town_name", "server_id"]),
+    [focusedCameras, keyword, deviceStatusFilter]
   );
   const shownServers = useMemo(
-    () => filterByKeyword(focusedServers, keyword, ["id", "name", "ip", "node_type"]),
-    [focusedServers, keyword]
+    () => filterByKeyword(filterByStatus(focusedServers, "server", deviceStatusFilter), keyword, ["id", "name", "ip", "node_type"]),
+    [focusedServers, keyword, deviceStatusFilter]
   );
   const shownStreams = useMemo(
-    () => filterByKeyword(focusedStreams, keyword, ["id", "camera_id", "server_id", "ssrc"]),
-    [focusedStreams, keyword]
+    () => filterByKeyword(filterByStatus(focusedStreams, "stream", deviceStatusFilter), keyword, ["id", "camera_id", "server_id", "ssrc"]),
+    [focusedStreams, keyword, deviceStatusFilter]
   );
 
   const loadData = async () => {
@@ -1728,11 +1750,23 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   }, [cameraId, cameras, focusTarget?.version]);
 
   useEffect(() => {
+    if (focusTarget?.deviceTab) {
+      setActiveTab(focusTarget.deviceTab);
+    }
+    if (focusTarget?.statusFilter) {
+      setDeviceStatusFilter(focusTarget.statusFilter);
+    }
+  }, [focusTarget?.version]);
+
+  useEffect(() => {
     setDetail(null);
     setDiagnosisCamera(null);
     setDiagnosisFromExternal(false);
     setFormState(null);
-    setActiveTab("camera");
+    if (!focusTarget?.deviceTab) {
+      setActiveTab("camera");
+      setDeviceStatusFilter("all");
+    }
   }, [resetVersion]);
 
   const closeDetail = () => {
@@ -1774,7 +1808,9 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       ? `当前摄像机：${focusTarget.name}`
       : focusTarget.nodeType === "custom_folder"
       ? `当前分区：${focusTarget.name}`
-      : `当前行政区：${focusTarget.name}`
+      : focusTarget.nodeType === "region"
+      ? `当前行政区：${focusTarget.name}`
+      : "当前范围：全网设备"
     : "当前范围：全网设备";
 
   const handleOpenCreate = (type) => {
@@ -1995,27 +2031,40 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
             </button>
           </div>
 
-          <div className="grid w-fit min-w-0 grid-cols-3 rounded-[var(--layout-radius-lg)] bg-[var(--color-control-bg)] p-[var(--layout-segment-padding)] text-ui-medium">
-            {[
-              { key: "camera", label: "摄像机", icon: Camera },
-              { key: "server", label: "服务器", icon: Server },
-              { key: "stream", label: "流链路", icon: Link2 },
-            ].map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => {
-                  setDetail(null);
-                  setDiagnosisCamera(null);
-                  setDiagnosisFromExternal(false);
-                  setActiveTab(key);
-                }}
-                className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] whitespace-nowrap rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
-              >
-                <Icon size="var(--icon-bottom)" />
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-[var(--layout-content-gap)]">
+            <div className="grid w-fit min-w-0 grid-cols-3 rounded-[var(--layout-radius-lg)] bg-[var(--color-control-bg)] p-[var(--layout-segment-padding)] text-ui-medium">
+              {[
+                { key: "camera", label: "摄像机", icon: Camera },
+                { key: "server", label: "服务器", icon: Server },
+                { key: "stream", label: "流链路", icon: Link2 },
+              ].map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setDetail(null);
+                    setDiagnosisCamera(null);
+                    setDiagnosisFromExternal(false);
+                    setActiveTab(key);
+                  }}
+                  className={`flex min-h-[var(--layout-segment-button-height)] items-center justify-center gap-[var(--layout-search-gap)] whitespace-nowrap rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] font-medium transition-colors ${activeTab === key ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm" : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"}`}
+                >
+                  <Icon size="var(--icon-bottom)" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            
+            <select
+              value={deviceStatusFilter}
+              onChange={(event) => setDeviceStatusFilter(event.target.value)}
+              className="min-h-[var(--layout-segment-button-height)] shrink-0 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-medium text-[var(--color-text-main)] outline-none hover:border-[var(--color-accent)] transition-colors"
+            >
+              <option value="all">全部状态</option>
+              <option value="normal">正常</option>
+              <option value="fault">异常</option>
+              <option value="offline">离线</option>
+            </select>
           </div>
 
           <div className="flex justify-end">
