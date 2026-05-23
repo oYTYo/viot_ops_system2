@@ -1,121 +1,145 @@
-需求：
-正如你可见，我目前的侧边栏包括一个行政区树和一个我的收藏。但是专业人员告诉我，如果想做一个产品化的系统，就要符合产品化规范，他建议我在行政区前面再加一栏叫作“分组”，也就是让我把侧边栏改成：“分组、行政区、收藏（从我的收藏缩短写为收藏）”，其中行政区、收藏的功能我已经实现好了，分组这一栏我还没实现，所以需要你来实现一下。当然，你不需要完整地实现分组的全部功能，我们只需要做出最基础的功能，比如新建和删除功能即可，这个分组的新建就是弹出一个窗口，允许用户从行政区窗口里展示的摄像机列表中里面选出自己感兴趣的摄像机加入分组，以下是我给你的修改方案，请你优先分析修改方案的可行性，以及修改方案是否全面，如果不够全面请你继续细化一下具体策略：
+你是一名专业的web开发程序员，这是我的web系统项目。刚刚我给系统母版的侧边栏做了一些修改，添加了一个分组功能。但是这个分组功能特别粗糙，和行政区以及收藏栏格格不入，具体表现如下：
 
-一、 后端修改方案
-需要新增数据表来存储分组信息，以及分组与设备的关联关系，并暴露对应的 API。
+1. 列表的样式不好看。这一点应该参考收藏栏里面的样式，有设备状态和摄像机icon，后面才跟着摄像机名称，我觉得分组的样式肯定要和收藏栏统一，甚至就是完全按照收藏栏的代码来做；
 
-1. 新增数据库模型 (backend/models.py)
-新增 DeviceGroup（设备分组表）和 GroupCameraLink（分组与设备关联表）。
+2. 交互没实现。比如双击摄像机就应该在电子地图上面定位到指定摄像机，目前这个分组压根没实现任何交互。
 
-Python
-# backend/models.py 新增核心代码
-from sqlalchemy import Table, Column, String, ForeignKey
 
-# 分组与摄像机的多对多关联表
-group_camera_link = Table(
-    "group_camera_link",
-    Base.metadata,
-    Column("group_id", String(64), ForeignKey("device_group.id", ondelete="CASCADE"), primary_key=True),
-    Column("camera_id", String(64), ForeignKey("camera.id", ondelete="CASCADE"), primary_key=True),
-)
 
-class DeviceGroup(Base):
-    """设备自定义分组"""
-    __tablename__ = "device_group"
+所以我建议对于分组展示的样式和交互方式，直接照搬收藏栏，同时还保留一些分组独特的功能比如列表里的新增分组和删除分组的设定。请你阅读一下相关代码，给出可靠的修改方案。 
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
-    parent_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("device_group.id", ondelete="CASCADE"), nullable=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+为了让分组功能与行政区、收藏栏的样式和交互完全对齐，最可靠的方案是废弃独立的 GroupTreeNode，将分组数据转换为 TreeNode 能识别的标准节点格式，直接复用 TreeNode 组件。
 
-    # 关联摄像机
-    cameras: Mapped[list["Camera"]] = relationship(
-        secondary=group_camera_link,
-        backref="groups",
-        lazy="selectin"
-    )
-2. 新增分组 API (backend/main.py)
-需要提供新建分组（同时绑定摄像机）、删除分组、以及获取分组树的接口。
+这样不仅自带了摄像机状态图标、展开/收起动画，还能直接继承已有的双击定位 (onCameraDoubleClick) 等核心交互。
 
-Python
-# backend/main.py 核心逻辑
-@app.post("/groups")
-def create_group(payload: schemas.DeviceGroupCreate, db: Session = Depends(get_db)):
-    # 1. 创建分组基本信息
-    new_group = models.DeviceGroup(
-        id=generate_id(), 
-        name=payload.name, 
-        parent_id=payload.parent_id
-    )
-    # 2. 绑定选中的摄像机 (假设 payload 传了 camera_ids 列表)
-    if payload.camera_ids:
-        cameras = db.query(models.Camera).filter(models.Camera.id.in_(payload.camera_ids)).all()
-        new_group.cameras.extend(cameras)
-        
-    db.add(new_group)
-    db.commit()
-    return new_group
+以下是需要修改的代码部分：
 
-@app.delete("/groups/{group_id}")
-def delete_group(group_id: str, db: Session = Depends(get_db)):
-    # 级联删除处理（根据 parent_id 关联关系和级联设置）
-    group = db.get(models.DeviceGroup, group_id)
-    db.delete(group)
-    db.commit()
-    return {"message": "deleted"}
-二、 前端修改方案
-你提供的 DeviceManage.jsx 是右侧的内容区，侧边栏树应该在包含它的父组件（如 MasterLayout.jsx 或专门的 Sidebar 组件）中。
-
-1. 侧边栏 Tab 切换改造
-将原来的双 Tab 改为三 Tab。
+1. 新增数据转换函数 (建议放在 normalizeCameraForCustomFolder 下方)
+将后端的纯分组数据映射成标准树节点，计算好在线数和总数。
 
 JavaScript
-// 侧边栏状态控制
-const [activeTreeTab, setActiveTreeTab] = useState("group"); // 'group' | 'region' | 'favorite'
-
-// UI 渲染 (类似原来的 Tab 栏)
-<div className="flex border-b">
-  <button onClick={() => setActiveTreeTab('group')}>分组</button>
-  <button onClick={() => setActiveTreeTab('region')}>行政区</button>
-  <button onClick={() => setActiveTreeTab('favorite')}>收藏</button>
-</div>
-2. 新增“创建分组”弹窗组件
-这个弹窗需要包含两部分：输入分组名称，以及一个能够勾选摄像机的列表/树。
-
-JavaScript
-// 前端伪代码：新建分组及绑定设备弹窗
-function CreateGroupModal({ onClose, onSuccess }) {
-  const [name, setName] = useState("");
-  const [selectedCameraIds, setSelectedCameraIds] = useState([]); // 勾选的摄像机
-
-  const handleSubmit = async () => {
-    await api.post('/groups', {
-      name,
-      parent_id: null, // 如果支持层级，这里取当前选中的父节点
-      camera_ids: selectedCameraIds 
-    });
-    onSuccess();
+function buildGroupNode(group) {
+  const subGroups = (group.children || []).map(buildGroupNode);
+  const cameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
+  
+  const onlineCameras = cameras.filter((c) => c.status !== "offline").length;
+  const onlineSub = subGroups.reduce((acc, g) => acc + (g.online || 0), 0);
+  
+  return {
+    id: `group-${group.id}`, // 增加前缀避免和行政区ID冲突
+    rawId: group.id,         // 记录原始ID供删除使用
+    nodeType: "group",
+    name: repairText(group.name || "未命名分组"),
+    level: "group",
+    children: [...subGroups, ...cameras],
+    loaded: true,
+    isLeaf: subGroups.length === 0 && cameras.length === 0,
+    online: onlineCameras + onlineSub,
+    total: group.camera_count ?? (cameras.length + subGroups.reduce((acc, g) => acc + (g.total || 0), 0)),
+    raw: group,
   };
-
-  return (
-    <div className="modal">
-       <h3>新建分组</h3>
-       <input value={name} onChange={e => setName(e.target.value)} placeholder="分组名称" />
-       
-       {/* 重点：复用你现有的行政区拉取逻辑，展示一个带 Checkbox 的设备列表/树供用户勾选 */}
-       <div className="camera-selector-tree">
-          <RegionAndCameraTreeWithCheckbox 
-             onSelectionChange={ids => setSelectedCameraIds(ids)} 
-          />
-       </div>
-
-       <button onClick={handleSubmit}>确认</button>
-    </div>
-  )
 }
-三、 总结与确认
-底层变更：引入 DeviceGroup 表和多对多中间表。
+2. 改造 TreeNode 组件
+让标准树节点支持分组特有的逻辑（显示删除按钮、隐藏收藏按钮）。
+修改 TreeNode 的参数和解构：
 
-API 扩展：增加增删改查和绑定的端点。
+JavaScript
+function TreeNode({
+  node,
+  // ...保留其他属性
+  onRemoveCameraFromCustomFolder,
+  parentCustomFolderId = "",
+  onDeleteGroup, // ✨ 新增属性
+}) {
+  const isLoading = loadingNodeId === node.id;
+  const isCamera = node.nodeType === "camera";
+  const isCustomFolder = node.nodeType === "custom_folder";
+  const isGroup = node.nodeType === "group"; // ✨ 新增判断
+  // ...
+修改 TreeNode 中的 Action Buttons 区域：
+找到渲染 Trash2 和 Star 的地方，修改如下：
 
-UI 重构：在侧边栏组件增加 Tab 状态，并补充带有复选框逻辑的设备选择弹窗。
+JavaScript
+        {isCustomFolder && (
+          <button
+            title="删除自定义文件夹"
+            // ... 保持原有代码不变
+          >
+            <Trash2 size="var(--icon-tree-action)" />
+          </button>
+        )}
+        {/* ✨ 新增：分组的删除按钮 */}
+        {isGroup && (
+          <button
+            title="删除分组"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteGroup?.(node);
+            }}
+            className="ml-[var(--layout-tree-action-gap)] hidden rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)] group-hover:block"
+          >
+            <Trash2 size="var(--icon-tree-action)" />
+          </button>
+        )}
+        {/* ✨ 修改：普通分组不显示收藏按钮，防止滥用 */}
+        {!isGroup && (
+          <button
+            title={isFavorite ? "取消收藏" : "收藏"}
+            // ... 保持原有代码不变
+          >
+            {isFavorite ? <Star size="var(--icon-tree-action)" className="fill-current text-[var(--color-accent)]" /> : <StarOff size="var(--icon-tree-action)" />}
+          </button>
+        )}
+3. 修改 Sidebar 组件
+统一数据流，彻底移除对 GroupTreeNode 的依赖。
+
+3.1 修改数据获取逻辑： (共2处，loadGroups 和增删操作后)
+在获取到 getGroupTree() 后，必须套用转换函数：
+
+JavaScript
+    const loadGroups = async () => {
+      setLoadingGroups(true);
+      setError("");
+      try {
+        const data = await getGroupTree();
+        setGroupTree(data.map(buildGroupNode)); // ✨ 核心修改：映射数据
+      } catch (err) {
+        // ...
+同样，在 handleCreateGroup 和 handleDeleteGroup 获取新列表后也要 data.map(buildGroupNode)。
+
+3.2 清理多余状态：
+删除无用的状态 expandedGroupIds（直接和行政区共用 expandedNodeIds 即可）：
+
+JavaScript
+  // 删掉这行：const [expandedGroupIds, setExpandedGroupIds] = useState(new Set());
+3.3 替换渲染组件：
+找到 Sidebar 中渲染 shownTree 的部分，将 mode === "group" ? <GroupTreeNode /> : <TreeNode /> 的复杂判断，统一替换为 <TreeNode />：
+
+JavaScript
+              {shownTree.length ? (
+                shownTree.map((node) => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    favoriteIds={favoriteIds}
+                    previewingCameraIds={previewingCameraIds}
+                    loadingNodeId={loadingNodeId}
+                    expandedNodeIds={expandedNodeIds} // ✨ 直接复用统一的展开状态
+                    onSetExpanded={setNodeExpanded}
+                    onToggleFavorite={toggleFavorite}
+                    onLoadChildren={loadChildren}
+                    onRefreshNode={refreshNode}
+                    onCameraDoubleClick={onCameraDoubleClick} // ✨ 直接继承双击定位功能
+                    onNodeDoubleClick={onNodeDoubleClick}
+                    onCreateCustomFolder={handleCreateCustomFolder}
+                    onDeleteCustomFolder={handleDeleteCustomFolder}
+                    onDropCameraToCustomFolder={handleDropCameraToCustomFolder}
+                    onRemoveCameraFromCustomFolder={handleRemoveCameraFromCustomFolder}
+                    onDeleteGroup={(node) => handleDeleteGroup(node.rawId)} // ✨ 传入分组删除事件
+                  />
+                ))
+              ) : mode !== "group" && (
+                <div className="mt-[var(--layout-empty-margin-top)] text-center text-ui-medium text-[var(--color-text-muted)]">暂无数据</div>
+              )}
+4. 收尾清理
+将文件中原本为了分组硬写的那个大块组件 function GroupTreeNode({ ... }) { ... } （大概在355行到420行左右）全部删除，保持代码整洁。

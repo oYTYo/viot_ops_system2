@@ -7,7 +7,6 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
-  FolderOpen,
   Plus,
   Trash2,
   Camera,
@@ -145,6 +144,27 @@ function makeCustomFolderNode({ id, name, regionCode, regionName, children = [] 
     isLeaf: normalizedChildren.length === 0,
     online,
     total: normalizedChildren.length,
+  };
+}
+
+function buildGroupNode(group) {
+  const subGroups = (group.children || []).map(buildGroupNode);
+  const cameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
+  const onlineCameras = cameras.filter((c) => c.status !== "offline").length;
+  const onlineSub = subGroups.reduce((acc, g) => acc + (g.online || 0), 0);
+
+  return {
+    id: `group-${group.id}`,
+    rawId: group.id,
+    nodeType: "group",
+    name: repairText(group.name || "未命名分组"),
+    level: "group",
+    children: [...subGroups, ...cameras],
+    loaded: true,
+    isLeaf: subGroups.length === 0 && cameras.length === 0,
+    online: onlineCameras + onlineSub,
+    total: group.camera_count ?? (cameras.length + subGroups.reduce((acc, g) => acc + (g.total || 0), 0)),
+    raw: group,
   };
 }
 
@@ -465,93 +485,6 @@ function getCameraStatusBadgeClass(status) {
 }
 
 
-function GroupTreeNode({
-  node,
-  depth = 0,
-  expandedGroupIds,
-  onSetExpandedGroup,
-  onDeleteGroup,
-}) {
-  const isExpanded = expandedGroupIds.has(node.id);
-  const hasChildren = node.children && node.children.length > 0;
-  const hasCameras = node.cameras && node.cameras.length > 0;
-
-  return (
-    <div style={{ paddingLeft: depth * 16 }}>
-      <div className="flex items-center gap-1 rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] py-[var(--layout-segment-button-padding-y)] hover:bg-[var(--color-hover-bg)] group">
-        {(hasChildren || hasCameras) ? (
-          <button
-            onClick={() => onSetExpandedGroup(node.id, !isExpanded)}
-            className="shrink-0 p-[2px] text-[var(--color-icon-muted)] hover:text-[var(--color-accent)]"
-          >
-            {isExpanded ? <ChevronDown size="var(--icon-tree-toggle)" /> : <ChevronRight size="var(--icon-tree-toggle)" />}
-          </button>
-        ) : (
-          <span className="w-[var(--icon-tree-toggle)] shrink-0" />
-        )}
-
-        {isExpanded ? (
-          <FolderOpen size="var(--icon-tree-node)" className="shrink-0 text-[var(--color-accent)]" />
-        ) : (
-          <Folder size="var(--icon-tree-node)" className="shrink-0 text-[var(--color-accent)]" />
-        )}
-
-        <span className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-main)]">
-          {node.name}
-        </span>
-
-        {(hasCameras || hasChildren) && (
-          <span className="shrink-0 text-ui-small text-[var(--color-text-muted)]">
-            {node.camera_count || 0}
-          </span>
-        )}
-
-        <button
-          onClick={() => onDeleteGroup(node.id)}
-          className="shrink-0 p-[2px] text-[var(--color-icon-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error-text)]"
-        >
-          <Trash2 size="var(--icon-tree-action)" />
-        </button>
-      </div>
-
-      {isExpanded && hasCameras && (
-        <div className="ml-[24px]">
-          {node.cameras.map((camera) => (
-            <div
-              key={camera.id}
-              className="flex items-center gap-1 rounded-[var(--layout-radius-md)] px-[var(--layout-segment-button-padding-x)] py-[4px] hover:bg-[var(--color-hover-bg)]"
-            >
-              <Camera size="var(--icon-tree-node)" className="shrink-0 text-[var(--color-icon-muted)]" />
-              <span className="min-w-0 flex-1 truncate text-ui-small text-[var(--color-text-main)]">
-                {camera.name}
-              </span>
-              <span className={`shrink-0 text-ui-small ${getCameraStatusBadgeClass(camera.status)}`}>
-                {getCameraStatusText(camera.status)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {isExpanded && hasChildren && (
-        <div>
-          {node.children.map((child) => (
-            <GroupTreeNode
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              expandedGroupIds={expandedGroupIds}
-              onSetExpandedGroup={onSetExpandedGroup}
-              onDeleteGroup={onDeleteGroup}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
 function CreateGroupModal({ onClose, onSubmit }) {
   const [name, setName] = useState("");
   const [selectedCameraIds, setSelectedCameraIds] = useState([]);
@@ -846,10 +779,12 @@ function TreeNode({
   onDropCameraToCustomFolder,
   onRemoveCameraFromCustomFolder,
   parentCustomFolderId = "",
+  onDeleteGroup,
 }) {
   const isLoading = loadingNodeId === node.id;
   const isCamera = node.nodeType === "camera";
   const isCustomFolder = node.nodeType === "custom_folder";
+  const isGroup = node.nodeType === "group";
   const isLeaf = node.isLeaf || isCamera;
   const open = expandedNodeIds.has(node.id);
   const canExpand = !isLeaf && (node.children?.length > 0 || !node.loaded);
@@ -1022,16 +957,30 @@ function TreeNode({
             <Trash2 size="var(--icon-tree-action)" />
           </button>
         )}
-        <button
-          title={isFavorite ? "取消收藏" : "收藏"}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleFavorite(node);
-          }}
-          className="ml-[var(--layout-tree-action-gap)] rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] group-hover:block"
-        >
-          {isFavorite ? <Star size="var(--icon-tree-action)" className="fill-current text-[var(--color-accent)]" /> : <StarOff size="var(--icon-tree-action)" />}
-        </button>
+        {isGroup && (
+          <button
+            title="删除分组"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteGroup?.(node);
+            }}
+            className="ml-[var(--layout-tree-action-gap)] hidden rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)] group-hover:block"
+          >
+            <Trash2 size="var(--icon-tree-action)" />
+          </button>
+        )}
+        {!isGroup && (
+          <button
+            title={isFavorite ? "取消收藏" : "收藏"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(node);
+            }}
+            className="ml-[var(--layout-tree-action-gap)] rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)] group-hover:block"
+          >
+            {isFavorite ? <Star size="var(--icon-tree-action)" className="fill-current text-[var(--color-accent)]" /> : <StarOff size="var(--icon-tree-action)" />}
+          </button>
+        )}
       </div>
 
       {node.children?.length > 0 && open && (
@@ -1056,6 +1005,7 @@ function TreeNode({
               onDropCameraToCustomFolder={onDropCameraToCustomFolder}
               onRemoveCameraFromCustomFolder={onRemoveCameraFromCustomFolder}
               parentCustomFolderId={isCustomFolder ? node.id : parentCustomFolderId}
+              onDeleteGroup={onDeleteGroup}
             />
           ))}
         </div>
@@ -1093,7 +1043,6 @@ function Sidebar({
   const [groupTree, setGroupTree] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
-  const [expandedGroupIds, setExpandedGroupIds] = useState(new Set());
 
 
   const [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set([COUNTRY_NODE_ID]));
@@ -1187,7 +1136,7 @@ function Sidebar({
       setError("");
       try {
         const data = await getGroupTree();
-        setGroupTree(data);
+        setGroupTree(data.map(buildGroupNode));
       } catch (err) {
         if (isCanceledRequest(err)) return;
         setError(err.message || "加载分组失败");
@@ -1630,7 +1579,7 @@ function Sidebar({
         camera_ids: cameraIds,
       });
       const data = await getGroupTree();
-      setGroupTree(data);
+      setGroupTree(data.map(buildGroupNode));
       setShowCreateGroupModal(false);
       setError("");
     } catch (err) {
@@ -1643,7 +1592,7 @@ function Sidebar({
     try {
       await deleteGroup(groupId);
       const data = await getGroupTree();
-      setGroupTree(data);
+      setGroupTree(data.map(buildGroupNode));
       setError("");
     } catch (err) {
       setError(err.message || "删除分组失败");
@@ -1884,41 +1833,25 @@ function Sidebar({
               )}
               {shownTree.length ? (
                 shownTree.map((node) => (
-                  mode === "group" ? (
-                    <GroupTreeNode
-                      key={node.id}
-                      node={node}
-                      expandedGroupIds={expandedGroupIds}
-                      onSetExpandedGroup={(id, expanded) => {
-                        setExpandedGroupIds((prev) => {
-                          const next = new Set(prev);
-                          if (expanded) next.add(id);
-                          else next.delete(id);
-                          return next;
-                        });
-                      }}
-                      onDeleteGroup={handleDeleteGroup}
-                    />
-                  ) : (
-                    <TreeNode
-                      key={node.id}
-                      node={node}
-                      favoriteIds={favoriteIds}
-                      previewingCameraIds={previewingCameraIds}
-                      loadingNodeId={loadingNodeId}
-                      expandedNodeIds={expandedNodeIds}
-                      onSetExpanded={setNodeExpanded}
-                      onToggleFavorite={toggleFavorite}
-                      onLoadChildren={loadChildren}
-                      onRefreshNode={refreshNode}
-                      onCameraDoubleClick={onCameraDoubleClick}
-                      onNodeDoubleClick={onNodeDoubleClick}
-                      onCreateCustomFolder={handleCreateCustomFolder}
-                      onDeleteCustomFolder={handleDeleteCustomFolder}
-                      onDropCameraToCustomFolder={handleDropCameraToCustomFolder}
-                      onRemoveCameraFromCustomFolder={handleRemoveCameraFromCustomFolder}
-                    />
-                  )
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    favoriteIds={favoriteIds}
+                    previewingCameraIds={previewingCameraIds}
+                    loadingNodeId={loadingNodeId}
+                    expandedNodeIds={expandedNodeIds}
+                    onSetExpanded={setNodeExpanded}
+                    onToggleFavorite={toggleFavorite}
+                    onLoadChildren={loadChildren}
+                    onRefreshNode={refreshNode}
+                    onCameraDoubleClick={onCameraDoubleClick}
+                    onNodeDoubleClick={onNodeDoubleClick}
+                    onCreateCustomFolder={handleCreateCustomFolder}
+                    onDeleteCustomFolder={handleDeleteCustomFolder}
+                    onDropCameraToCustomFolder={handleDropCameraToCustomFolder}
+                    onRemoveCameraFromCustomFolder={handleRemoveCameraFromCustomFolder}
+                    onDeleteGroup={(node) => handleDeleteGroup(node.rawId)}
+                  />
                 ))
               ) : mode !== "group" && (
                 <div className="mt-[var(--layout-empty-margin-top)] text-center text-ui-medium text-[var(--color-text-muted)]">暂无数据</div>
