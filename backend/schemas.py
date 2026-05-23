@@ -678,3 +678,37 @@ class StatisticsOverviewRead(BaseModel):
     anomaly_patterns: list[dict[str, Any]]
     anomaly_entities: list[dict[str, Any]]
     work_order_efficiency: dict[str, Any]
+
+
+# =========================
+# DeviceGroup
+# =========================
+
+class DeviceGroupBase(BaseModel):
+    name: str = Field(..., max_length=64)
+    parent_id: str | None = Field(default=None, max_length=64)
+    sort_order: int = 0
+
+
+class DeviceGroupCreate(DeviceGroupBase):
+    camera_ids: list[str] = Field(default_factory=list)
+
+
+class DeviceGroupUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=64)
+    parent_id: str | None = None
+    sort_order: int | None = None
+    camera_ids: list[str] | None = None
+
+
+class DeviceGroupRead(DeviceGroupBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    cameras: list[CameraRead] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceGroupTreeNode(DeviceGroupRead):
+    children: list["DeviceGroupTreeNode"] = Field(default_factory=list)
+    camera_count: int = 0

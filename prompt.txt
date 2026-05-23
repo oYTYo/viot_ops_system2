@@ -1,51 +1,121 @@
-还有个设定，如何让跑马灯首位可以相连？目前是整个字段放映结束之后才开始第二遍放映，中间有段很长的空白
+需求：
+正如你可见，我目前的侧边栏包括一个行政区树和一个我的收藏。但是专业人员告诉我，如果想做一个产品化的系统，就要符合产品化规范，他建议我在行政区前面再加一栏叫作“分组”，也就是让我把侧边栏改成：“分组、行政区、收藏（从我的收藏缩短写为收藏）”，其中行政区、收藏的功能我已经实现好了，分组这一栏我还没实现，所以需要你来实现一下。当然，你不需要完整地实现分组的全部功能，我们只需要做出最基础的功能，比如新建和删除功能即可，这个分组的新建就是弹出一个窗口，允许用户从行政区窗口里展示的摄像机列表中里面选出自己感兴趣的摄像机加入分组，以下是我给你的修改方案，请你优先分析修改方案的可行性，以及修改方案是否全面，如果不够全面请你继续细化一下具体策略：
 
-由于原生的 CSS 特效中，单个标签在位移时无法凭空“克隆”自己，所以常规的 animation 滚动到末尾时，必须等整个文本完全移出可视区，才会重新从右侧跳出来，这就导致了你看到的很长的空白。
+一、 后端修改方案
+需要新增数据表来存储分组信息，以及分组与设备的关联关系，并暴露对应的 API。
 
-要实现通俗意义上的无缝首尾相连（无缝滚动），最稳妥、优雅且不需要大改 JSX 结构的纯 CSS 办法是：利用 background-repeat 的平铺特性，把文字转为背景，或者直接通过复制一份文本进行双列拼接。
+1. 新增数据库模型 (backend/models.py)
+新增 DeviceGroup（设备分组表）和 GroupCameraLink（分组与设备关联表）。
 
-不过针对你目前的告警列表（直接在 <td> 里面包裹单行文字），最直接、对样式破坏最小的首尾相连两全之策是以下两步修改：
+Python
+# backend/models.py 新增核心代码
+from sqlalchemy import Table, Column, String, ForeignKey
 
-第一步：修改 JSX 中的包裹结构（复制一份文本）
-找到 VideoAlarmManage 组件内表格 <tbody> 里的 alarm.time 和 alarm.source 这两个单元格（<td>），让内部的文字“复制一份”拼在后面。
+# 分组与摄像机的多对多关联表
+group_camera_link = Table(
+    "group_camera_link",
+    Base.metadata,
+    Column("group_id", String(64), ForeignKey("device_group.id", ondelete="CASCADE"), primary_key=True),
+    Column("camera_id", String(64), ForeignKey("camera.id", ondelete="CASCADE"), primary_key=True),
+)
 
-将对应的 <td> 内部结构修改为：
+class DeviceGroup(Base):
+    """设备自定义分组"""
+    __tablename__ = "device_group"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("device_group.id", ondelete="CASCADE"), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    # 关联摄像机
+    cameras: Mapped[list["Camera"]] = relationship(
+        secondary=group_camera_link,
+        backref="groups",
+        lazy="selectin"
+    )
+2. 新增分组 API (backend/main.py)
+需要提供新建分组（同时绑定摄像机）、删除分组、以及获取分组树的接口。
+
+Python
+# backend/main.py 核心逻辑
+@app.post("/groups")
+def create_group(payload: schemas.DeviceGroupCreate, db: Session = Depends(get_db)):
+    # 1. 创建分组基本信息
+    new_group = models.DeviceGroup(
+        id=generate_id(), 
+        name=payload.name, 
+        parent_id=payload.parent_id
+    )
+    # 2. 绑定选中的摄像机 (假设 payload 传了 camera_ids 列表)
+    if payload.camera_ids:
+        cameras = db.query(models.Camera).filter(models.Camera.id.in_(payload.camera_ids)).all()
+        new_group.cameras.extend(cameras)
+        
+    db.add(new_group)
+    db.commit()
+    return new_group
+
+@app.delete("/groups/{group_id}")
+def delete_group(group_id: str, db: Session = Depends(get_db)):
+    # 级联删除处理（根据 parent_id 关联关系和级联设置）
+    group = db.get(models.DeviceGroup, group_id)
+    db.delete(group)
+    db.commit()
+    return {"message": "deleted"}
+二、 前端修改方案
+你提供的 DeviceManage.jsx 是右侧的内容区，侧边栏树应该在包含它的父组件（如 MasterLayout.jsx 或专门的 Sidebar 组件）中。
+
+1. 侧边栏 Tab 切换改造
+将原来的双 Tab 改为三 Tab。
 
 JavaScript
-<td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-  <div className="viot-scroll-container w-full" title={alarm.time}>
-    <div className="viot-scroll-inner">
-      <span>{alarm.time}</span>
-      {/* 复制一份接在后面，用来填补空白实现首尾相连 */}
-      <span className="viot-scroll-replica">{alarm.time}</span>
+// 侧边栏状态控制
+const [activeTreeTab, setActiveTreeTab] = useState("group"); // 'group' | 'region' | 'favorite'
+
+// UI 渲染 (类似原来的 Tab 栏)
+<div className="flex border-b">
+  <button onClick={() => setActiveTreeTab('group')}>分组</button>
+  <button onClick={() => setActiveTreeTab('region')}>行政区</button>
+  <button onClick={() => setActiveTreeTab('favorite')}>收藏</button>
+</div>
+2. 新增“创建分组”弹窗组件
+这个弹窗需要包含两部分：输入分组名称，以及一个能够勾选摄像机的列表/树。
+
+JavaScript
+// 前端伪代码：新建分组及绑定设备弹窗
+function CreateGroupModal({ onClose, onSuccess }) {
+  const [name, setName] = useState("");
+  const [selectedCameraIds, setSelectedCameraIds] = useState([]); // 勾选的摄像机
+
+  const handleSubmit = async () => {
+    await api.post('/groups', {
+      name,
+      parent_id: null, // 如果支持层级，这里取当前选中的父节点
+      camera_ids: selectedCameraIds 
+    });
+    onSuccess();
+  };
+
+  return (
+    <div className="modal">
+       <h3>新建分组</h3>
+       <input value={name} onChange={e => setName(e.target.value)} placeholder="分组名称" />
+       
+       {/* 重点：复用你现有的行政区拉取逻辑，展示一个带 Checkbox 的设备列表/树供用户勾选 */}
+       <div className="camera-selector-tree">
+          <RegionAndCameraTreeWithCheckbox 
+             onSelectionChange={ids => setSelectedCameraIds(ids)} 
+          />
+       </div>
+
+       <button onClick={handleSubmit}>确认</button>
     </div>
-  </div>
-</td>
-(同样地，把紧随其后的 alarm.source 那一列也照着这个结构修改，复制一份 <span className="viot-scroll-replica">{alarm.source}</span>)
+  )
+}
+三、 总结与确认
+底层变更：引入 DeviceGroup 表和多对多中间表。
 
-第二步：修改 CSS 动画和样式
-找到组件最上方的 <style> 标签，将原本的跑马灯样式完全替换为以下更加凝练的无缝循环位移逻辑：
+API 扩展：增加增删改查和绑定的端点。
 
-JavaScript
-<style>{`
-  @keyframes viot-auto-scroll {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); } /* 只需要左移整个内部容器的一半（即第一份文本的宽度） */
-  }
-  .viot-scroll-container {
-    display: block;
-    width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .viot-scroll-inner {
-    display: inline-block;
-    animation: viot-auto-scroll 20s linear infinite; /* 20s 也是你刚刚调整好的慢速 */
-  }
-  /* 调整副本与原本之间的间距，让首尾衔接更自然 */
-  .viot-scroll-replica {
-    padding-left: 2rem; /* 两个文本之间的间距，可根据需要微调 */
-  }
-`}</style>
-为什么这样能消除空白并首尾相连：
-原本的动画是从 100%（右侧屏幕外）走到 -100%（左侧屏幕外）。现在由于后面紧跟了一份一模一样的副本文本，当第一份文本刚好完全向左滑出边界时，第二份文本刚好补齐在它的位置上。此时动画悄悄咪咪地瞬间重置回 0，视觉上就会变成完全没有任何断层的无限无缝首尾相连。
+UI 重构：在侧边栏组件增加 Tab 状态，并补充带有复选框逻辑的设备选择弹窗。

@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Table,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -716,3 +718,81 @@ class VideoDiagnosis(Base):
         default=datetime.utcnow,
         nullable=False,
     )
+
+
+# 分组与摄像机的多对多关联表
+group_camera_link = Table(
+    "group_camera_link",
+    Base.metadata,
+    Column(
+        "group_id",
+        String(64),
+        ForeignKey("device_group.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "camera_id",
+        String(64),
+        ForeignKey("camera.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class DeviceGroup(Base):
+    """设备自定义分组，支持层级嵌套。"""
+
+    __tablename__ = "device_group"
+
+    __table_args__ = (
+        Index("ix_device_group_parent_id", "parent_id"),
+        Index("ix_device_group_sort_order", "sort_order"),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # 父分组 ID，支持层级嵌套。
+    parent_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("device_group.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    # 前端展示排序使用。
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    # 父分组
+    parent: Mapped["DeviceGroup | None"] = relationship(
+        remote_side=[id],
+        back_populates="children",
+    )
+
+    # 子分组
+    children: Mapped[list["DeviceGroup"]] = relationship(
+        back_populates="parent",
+        lazy="selectin",
+    )
+
+    # 关联摄像机
+    cameras: Mapped[list["Camera"]] = relationship(
+        secondary=group_camera_link,
+        backref="groups",
+        lazy="selectin",
+    )
+

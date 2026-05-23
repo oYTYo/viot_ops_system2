@@ -5,6 +5,7 @@ from random import randint
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +42,8 @@ app.add_middleware(
 def create_runtime_tables() -> None:
     models.WorkOrder.__table__.create(bind=engine, checkfirst=True)
     models.VideoDiagnosis.__table__.create(bind=engine, checkfirst=True)
+    models.DeviceGroup.__table__.create(bind=engine, checkfirst=True)
+    models.group_camera_link.create(bind=engine, checkfirst=True)
     _normalize_existing_camera_protocols()
     _ensure_huli_alarm_demo_cameras()
     _ensure_huli_fake_camera_fleet()
@@ -3340,3 +3343,108 @@ def get_statistics_overview(
             "avg_resolve_hours": round(avg_resolve_hours, 2),
         },
     }
+
+
+# =========================
+# DeviceGroup CRUD
+# =========================
+
+
+@app.post("/groups", response_model=schemas.DeviceGroupRead)
+def create_group(payload: schemas.DeviceGroupCreate, db: Session = Depends(get_db)):
+    if payload.parent_id and not db.get(models.DeviceGroup, payload.parent_id):
+        raise HTTPException(status_code=400, detail=f"parent group '{payload.parent_id}' does not exist")
+
+    group_id = str(uuid4())
+    new_group = models.DeviceGroup(
+        id=group_id,
+        name=payload.name,
+        parent_id=payload.parent_id,
+        sort_order=payload.sort_order,
+    )
+
+    if payload.camera_ids:
+        cameras = db.query(models.Camera).filter(models.Camera.id.in_(payload.camera_ids)).all()
+        if len(cameras) != len(payload.camera_ids):
+            raise HTTPException(status_code=400, detail="one or more camera IDs are invalid")
+        new_group.cameras.extend(cameras)
+
+    db.add(new_group)
+    _commit_or_rollback(db, "failed to create device group")
+    db.refresh(new_group)
+    return new_group
+
+
+@app.get("/groups/tree", response_model=list[schemas.DeviceGroupTreeNode])
+def get_group_tree(db: Session = Depends(get_db)):
+    all_groups = db.query(models.DeviceGroup).order_by(
+        models.DeviceGroup.sort_order, models.DeviceGroup.created_at
+    ).all()
+    group_map: dict[str, schemas.DeviceGroupTreeNode] = {}
+    for g in all_groups:
+        node = schemas.DeviceGroupTreeNode(
+            id=g.id,
+            name=g.name,
+            parent_id=g.parent_id,
+            sort_order=g.sort_order,
+            created_at=g.created_at,
+            updated_at=g.updated_at,
+            cameras=[schemas.CameraRead.model_validate(c) for c in g.cameras],
+            camera_count=len(g.cameras),
+            children=[],
+        )
+        group_map[g.id] = node
+
+    roots: list[schemas.DeviceGroupTreeNode] = []
+    for g in all_groups:
+        node = group_map[g.id]
+        if g.parent_id and g.parent_id in group_map:
+            group_map[g.parent_id].children.append(node)
+        else:
+            roots.append(node)
+    return roots
+
+
+@app.get("/groups/{group_id}", response_model=schemas.DeviceGroupRead)
+def get_group(group_id: str, db: Session = Depends(get_db)):
+    group = db.get(models.DeviceGroup, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="device group not found")
+    return group
+
+
+@app.put("/groups/{group_id}", response_model=schemas.DeviceGroupRead)
+def update_group(group_id: str, payload: schemas.DeviceGroupUpdate, db: Session = Depends(get_db)):
+    group = db.get(models.DeviceGroup, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="device group not found")
+
+    if payload.parent_id is not None:
+        if payload.parent_id == group_id:
+            raise HTTPException(status_code=400, detail="group cannot be its own parent")
+        if payload.parent_id and not db.get(models.DeviceGroup, payload.parent_id):
+            raise HTTPException(status_code=400, detail=f"parent group '{payload.parent_id}' does not exist")
+
+    update_data = payload.model_dump(exclude_unset=True, exclude={"camera_ids"})
+    _apply_update(group, update_data)
+
+    if payload.camera_ids is not None:
+        cameras = db.query(models.Camera).filter(models.Camera.id.in_(payload.camera_ids)).all()
+        if len(cameras) != len(payload.camera_ids):
+            raise HTTPException(status_code=400, detail="one or more camera IDs are invalid")
+        group.cameras.clear()
+        group.cameras.extend(cameras)
+
+    _commit_or_rollback(db, "failed to update device group")
+    db.refresh(group)
+    return group
+
+
+@app.delete("/groups/{group_id}")
+def delete_group(group_id: str, db: Session = Depends(get_db)):
+    group = db.get(models.DeviceGroup, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="device group not found")
+    db.delete(group)
+    _commit_or_rollback(db, "failed to delete device group")
+    return {"message": f"group '{group_id}' deleted"}
