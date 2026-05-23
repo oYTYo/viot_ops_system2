@@ -294,7 +294,7 @@ function HealthGaugeMini({ value, safeDays = 42 }) {
             <div className="text-ui-large font-bold leading-none" style={{ color }}>{numeric.toFixed(1)}</div>
           </div>
           {/* Hover 悬浮显示公式 */}
-          <div className="pointer-events-none absolute left-19/20 top-[110%] z-[9999] w-max -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+          <div className="pointer-events-none absolute left-67 top-[110%] z-[9999] w-max -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
             <LatexFormulaMini />
           </div>
         </div>
@@ -303,15 +303,15 @@ function HealthGaugeMini({ value, safeDays = 42 }) {
         <div className="flex flex-col gap-[var(--layout-search-gap)]">
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-accent)]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度90-100">健康</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">健康（健康度90-100）</span>
           </div>
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[#f59e0b]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度70-90">良好</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">良好（健康度70-90）</span>
           </div>
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-error-text)]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度低于70">危险</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">危险（健康度低于70）</span>
           </div>
         </div>
       </div>
@@ -442,7 +442,7 @@ function OperationMetricsPanel({ focusTarget, onNavigateToDevice }) {
           />
         </div>
       </DashboardSection>
-      <DashboardSection title="黄金指标：流链路全局健康度">
+      <DashboardSection title="流链路全局健康度">
         <HealthGaugeMini value={health} safeDays={data?.golden_metrics?.safe_days || 42} />
       </DashboardSection>
       <DashboardSection title="异常告警统计">

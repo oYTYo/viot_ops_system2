@@ -145,15 +145,15 @@ function HealthGauge({ value, formula, formulaLatex, sampleCount, safeDays = 42 
         <div className="flex flex-col gap-[var(--layout-search-gap)]">
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-accent)]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度90-100">健康</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">健康（健康度90-100）</span>
           </div>
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[#f59e0b]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度70-90">良好</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">良好（健康度70-90）</span>
           </div>
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-error-text)]" />
-            <span className="text-ui-medium text-[var(--color-text-main)] hover:text-[var(--color-accent)] transition-colors" title="健康度低于70">危险</span>
+            <span className="text-ui-medium text-[var(--color-text-main)]">危险（健康度低于70）</span>
           </div>
         </div>
       </div>

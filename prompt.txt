@@ -1,24 +1,51 @@
-请严格按照以下指令修改代码，不要自行发散：
-- 目标文件：[请替换为统计分析板块对应的组件路径，例如 src/components/StatisticalAnalysis/index.tsx]
-- 修改位置：组件的主渲染(Render)部分、样式定义部分及事件处理函数。
-- 修改逻辑：
-1. 【整体布局重构】：将包裹“统计分析”板块的最外层容器样式修改为四宫格布局。使用 CSS Grid：`display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px;`（gap可根据实际UI规范微调）。将原有的四个子模块分别放入四个 Grid Area 中。
+还有个设定，如何让跑马灯首位可以相连？目前是整个字段放映结束之后才开始第二遍放映，中间有段很长的空白
 
-2. 【第一象限（黄金指标）】：保留现有逻辑与组件，放入第一象限。
+由于原生的 CSS 特效中，单个标签在位移时无法凭空“克隆”自己，所以常规的 animation 滚动到末尾时，必须等整个文本完全移出可视区，才会重新从右侧跳出来，这就导致了你看到的很长的空白。
 
-3. 【第二象限（资源状态统计）】：
-   - 样式隔离：务必仅在当前组件内增加特定的 className 或使用 scoped 样式，绝对不能修改公用的状态统计组件样式（避免污染运维大屏）。
-   - 布局微调：从横向改为纵向 Flex 布局（`flex-direction: column`）。
-   - 内容重构：
-     - 第1行：新增公共图例（Legend），横向排列显示：“正常(对应的颜色标识)”、“异常(颜色)”、“断连(颜色)”。
-     - 第2/3/4行：分别渲染摄像机、流链路、服务器的统计条。移除它们原有的状态 Icon 和名称文本，仅保留“状态色条”和“数量数值”。确保这三行紧凑排列。
+要实现通俗意义上的无缝首尾相连（无缝滚动），最稳妥、优雅且不需要大改 JSX 结构的纯 CSS 办法是：利用 background-repeat 的平铺特性，把文字转为背景，或者直接通过复制一份文本进行双列拼接。
 
-4. 【第三象限（根因实体统计）】：
-   - 将原有按钮的文本从“完整表格”修改为“详情”。
-   - 修改该按钮的 onClick 事件，将其置空或仅阻止默认行为（不执行任何跳转或展开操作）。
-   - 直接在该象限的 DOM 内渲染完整数据列表/表格。
-   - 为包裹数据的容器添加样式：`overflow-y: auto;` 并限制合适的最大高度（如 `max-height: 100%;`），使其在当前宫格内支持下拉滚动，不撑开父级容器。
+不过针对你目前的告警列表（直接在 <td> 里面包裹单行文字），最直接、对样式破坏最小的首尾相连两全之策是以下两步修改：
 
-5. 【第四象限（告警类型统计）】：
-   - 将原有按钮的文本从“完整表格”修改为“详情”。
-   - 修改该按钮的 onClick 事件，使其不执行任何操作（同第三象限）。
+第一步：修改 JSX 中的包裹结构（复制一份文本）
+找到 VideoAlarmManage 组件内表格 <tbody> 里的 alarm.time 和 alarm.source 这两个单元格（<td>），让内部的文字“复制一份”拼在后面。
+
+将对应的 <td> 内部结构修改为：
+
+JavaScript
+<td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+  <div className="viot-scroll-container w-full" title={alarm.time}>
+    <div className="viot-scroll-inner">
+      <span>{alarm.time}</span>
+      {/* 复制一份接在后面，用来填补空白实现首尾相连 */}
+      <span className="viot-scroll-replica">{alarm.time}</span>
+    </div>
+  </div>
+</td>
+(同样地，把紧随其后的 alarm.source 那一列也照着这个结构修改，复制一份 <span className="viot-scroll-replica">{alarm.source}</span>)
+
+第二步：修改 CSS 动画和样式
+找到组件最上方的 <style> 标签，将原本的跑马灯样式完全替换为以下更加凝练的无缝循环位移逻辑：
+
+JavaScript
+<style>{`
+  @keyframes viot-auto-scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); } /* 只需要左移整个内部容器的一半（即第一份文本的宽度） */
+  }
+  .viot-scroll-container {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .viot-scroll-inner {
+    display: inline-block;
+    animation: viot-auto-scroll 20s linear infinite; /* 20s 也是你刚刚调整好的慢速 */
+  }
+  /* 调整副本与原本之间的间距，让首尾衔接更自然 */
+  .viot-scroll-replica {
+    padding-left: 2rem; /* 两个文本之间的间距，可根据需要微调 */
+  }
+`}</style>
+为什么这样能消除空白并首尾相连：
+原本的动画是从 100%（右侧屏幕外）走到 -100%（左侧屏幕外）。现在由于后面紧跟了一份一模一样的副本文本，当第一份文本刚好完全向左滑出边界时，第二份文本刚好补齐在它的位置上。此时动画悄悄咪咪地瞬间重置回 0，视觉上就会变成完全没有任何断层的无限无缝首尾相连。

@@ -349,13 +349,13 @@ function safePatternId(value) {
   return `alarm-stripe-${String(value).replace(/[^\w-]/g, "-")}`;
 }
 
-function ReconstructionChart({ title, series, now, legendMode = "horizontal", showLegend = true }) {
-  const width = 420;
-  const height = legendMode === "compactGrid" ? 170 : 130;
-  const padLeft = 42;
-  const padRight = 18;
-  const padTop = legendMode === "compactGrid" ? 4 : 26;
-  const padBottom = 30;
+function ReconstructionChart({ title, subtitle, series, now, legendMode = "horizontal", showLegend = true }) {
+  const width = 480; 
+  const height = 180; 
+  const padLeft = 0; 
+  const padRight = 80;
+  const padTop = 24; 
+  const padBottom = 32;
   const colors = ["var(--color-error-text)", "var(--color-accent)", "#f59e0b", "#8b5cf6"];
   const maxValue = 100;
   const xFor = (index, length) => padLeft + (index * (width - padLeft - padRight)) / Math.max(length - 1, 1);
@@ -367,50 +367,56 @@ function ReconstructionChart({ title, series, now, legendMode = "horizontal", sh
       return maxAtIndex > 50 ? index : null;
     })
     .filter((index) => index !== null);
-  const legendClass = legendMode === "compactGrid"
-    ? "absolute right-[var(--layout-search-padding-x)] top-[calc(var(--font-small)*1.05+var(--layout-tree-gap)*0.7)] z-10 grid grid-cols-2 gap-x-[var(--layout-tree-action-padding)] gap-y-[calc(var(--layout-tree-gap)*0.55)] rounded-[var(--layout-radius-sm)] bg-[var(--color-control-bg)]/85 px-[var(--layout-tree-action-padding)] py-[calc(var(--layout-tree-gap)*0.65)] shadow-sm backdrop-blur"
-    : "absolute right-[var(--layout-search-padding-x)] top-[var(--layout-search-padding-y)] z-10 flex flex-wrap justify-end gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-control-bg)]/75 px-[var(--layout-tree-action-padding)] py-[var(--layout-tree-gap)]";
-  const svgClass = legendMode === "compactGrid"
-    ? "-mt-[calc(var(--font-small)*0.9)] h-[calc(var(--font-large)*7.15)] w-full"
-    : "h-[calc(var(--font-large)*5.25)] w-full";
+
+  const isVerticalRight = legendMode === "verticalRight";
 
   return (
-    <div className="relative min-w-0 overflow-hidden rounded-[var(--layout-radius-sm)] bg-gradient-to-b from-[var(--color-control-bg)] to-transparent">
-      {title && <div className="px-[var(--layout-tree-action-padding)] pt-[calc(var(--layout-tree-gap)*0.35)] pb-0 text-ui-small leading-none text-[var(--color-text-main)]">{title}</div>}
-      {showLegend && <div className={legendClass}>
+    <div className="relative min-w-0 flex-1 overflow-hidden rounded-[var(--layout-radius-sm)] bg-gradient-to-b from-[var(--color-control-bg)] to-transparent flex flex-row h-full">
+      <div className="flex flex-col flex-1 min-w-0">
+        {title && (
+          <div className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-search-padding-y)] flex flex-wrap items-end gap-[var(--layout-search-gap)]">
+            <span className="text-ui-medium font-bold text-[var(--color-text-main)]">{title}</span>
+            {subtitle && <span className="text-ui-small text-[var(--color-text-muted)] pb-[1px]">{subtitle}</span>}
+          </div>
+        )}
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-h-[120px] flex-1">
+          <defs>
+            <pattern id={patternId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="3" height="6" fill="var(--color-error-text)" opacity="0.35" />
+            </pattern>
+          </defs>
+          <line x1={padLeft} x2={padLeft} y1={padTop} y2={height - padBottom} stroke="var(--color-panel-border)" />
+          <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="var(--color-panel-border)" />
+          <text x={padLeft - 8} y={padTop + 5} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{maxValue.toFixed(1)}</text>
+          <text x={padLeft - 8} y={height - padBottom + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">0</text>
+          {anomalyIndexes.map((index) => {
+            const start = xFor(Math.max(index - 0.5, 0), series[0].data.length);
+            const end = xFor(Math.min(index + 0.5, series[0].data.length - 1), series[0].data.length);
+            return <rect key={index} className="transition-all duration-700 ease-out" x={start} y={padTop} width={Math.max(8, end - start)} height={height - padTop - padBottom} fill={`url(#${patternId})`} opacity="0.55" />;
+          })}
+          {series.map((item, seriesIndex) => {
+            const points = item.data.map((point, index) => `${xFor(index, item.data.length)},${yFor(point.value)}`).join(" ");
+            return (
+              <g key={item.name}>
+                <polyline className="transition-all duration-700 ease-out" points={points} fill="none" stroke={colors[seriesIndex % colors.length]} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+            );
+          })}
+          <text x={(padLeft + width - padRight) / 2} y={height - 8} textAnchor="middle" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{formatShiftedClock(now, 30)}</text>
+          <text x={width - padRight} y={height - 8} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{formatClock(now)}</text>
+        </svg>
+      </div>
+
+      {showLegend && isVerticalRight && (
+        <div className="absolute left-[calc(100%-15rem)] top-0 bottom-0 flex flex-col justify-center gap-[var(--layout-content-gap)] bg-transparent">
           {series.map((item, index) => (
-            <span key={item.name} className="inline-flex items-center gap-[var(--layout-tree-gap)] text-[var(--color-text-muted)]">
-              <span className="h-[calc(var(--font-small)*0.38)] w-[calc(var(--font-small)*1.2)] rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
-              {item.name}
+            <span key={item.name} className="flex items-center whitespace-nowrap gap-[var(--layout-tree-gap)] text-ui-medium text-[var(--color-text-main)]">
+              <span className="h-[calc(var(--font-medium)*0.5)] w-[calc(var(--font-medium)*1.2)] shrink-0 rounded-full" style={{ backgroundColor: colors[index % colors.length] }} />
+              <span className="text-left">{item.name}</span>
             </span>
           ))}
-      </div>}
-      <svg viewBox={`0 0 ${width} ${height}`} className={svgClass}>
-        <defs>
-          <pattern id={patternId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <rect width="3" height="6" fill="var(--color-error-text)" opacity="0.35" />
-          </pattern>
-        </defs>
-        <line x1={padLeft} x2={padLeft} y1={padTop} y2={height - padBottom} stroke="var(--color-panel-border)" />
-        <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="var(--color-panel-border)" />
-        <text x={padLeft - 8} y={padTop + 5} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">{maxValue.toFixed(1)}</text>
-        <text x={padLeft - 8} y={height - padBottom + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">0</text>
-        {anomalyIndexes.map((index) => {
-          const start = xFor(Math.max(index - 0.5, 0), series[0].data.length);
-          const end = xFor(Math.min(index + 0.5, series[0].data.length - 1), series[0].data.length);
-          return <rect key={index} className="transition-all duration-700 ease-out" x={start} y={padTop} width={Math.max(8, end - start)} height={height - padTop - padBottom} fill={`url(#${patternId})`} opacity="0.55" />;
-        })}
-        {series.map((item, seriesIndex) => {
-          const points = item.data.map((point, index) => `${xFor(index, item.data.length)},${yFor(point.value)}`).join(" ");
-          return (
-            <g key={item.name}>
-              <polyline className="transition-all duration-700 ease-out" points={points} fill="none" stroke={colors[seriesIndex % colors.length]} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            </g>
-          );
-        })}
-        <text x={(padLeft + width - padRight) / 2} y={height - 4} textAnchor="middle" fill="var(--color-text-muted)" fontSize="var(--font-small)">{formatShiftedClock(now, 30)}</text>
-        <text x={width - padRight} y={height - 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">{formatClock(now)}</text>
-      </svg>
+        </div>
+      )}
     </div>
   );
 }
@@ -428,12 +434,12 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
   }, []);
 
   const data = buildMetricSeries(alarm, tick);
-  const width = 420;
-  const height = 150;
-  const padLeft = 44;
-  const padRight = 18;
-  const padTop = 18;
-  const padBottom = 28;
+  const width = 480; 
+  const height = 200;
+  const padLeft = 0; 
+  const padRight = 80;
+  const padTop = 24;
+  const padBottom = 32;
   const fixedMaxByMetric = {
     丢包率: 8,
     时延抖动: 90,
@@ -449,14 +455,11 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
   const area = `${padLeft},${height - padBottom} ${points} ${width - padRight},${height - padBottom}`;
   const threshold = Number(thresholds?.[alarm.metricName] ?? alarm.threshold ?? 0);
   const showThreshold = algorithm === "rule" && threshold > 0;
-  const description = algorithm === "rule"
-    ? `${alarm.metricName}触发规则阈值，当前趋势持续处于异常区间。`
-    : `${alarm.metricName}的重构损失显著偏高，指标分布偏离正常时空基线。`;
 
   if (algorithm === "algorithmA") {
     const data = buildReconstructionSeries(Number(alarm.metricValue || 1), tick, 8, 1);
     return (
-      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)] flex flex-col flex-1">
         <div className="mb-[var(--layout-search-gap)] text-ui-medium font-bold text-[var(--color-text-main)]">异常指标：时延抖动重构损失</div>
         <ReconstructionChart title="" series={[{ name: "时延抖动", data }]} now={now} showLegend={false} />
       </section>
@@ -468,7 +471,7 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
     const jitter = buildReconstructionSeries(1.4, tick + 2, 8, 0.88);
     const throughput = buildReconstructionSeries(1.1, tick + 4, 8, 0.72);
     return (
-      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)] flex flex-col flex-1">
         <div className="mb-[var(--layout-search-gap)] text-ui-medium font-bold text-[var(--color-text-main)]">异常指标：多指标联合重构损失</div>
         <ReconstructionChart title="" series={[{ name: "丢包率", data: packetLoss }, { name: "时延抖动", data: jitter }, { name: "吞吐量", data: throughput }]} now={now} />
       </section>
@@ -477,37 +480,37 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
 
   if (algorithm === "spatioTemporal") {
     const charts = [
-      { title: "上行链路", series: [{ name: "丢包率", data: buildReconstructionSeries(1.5, tick, 8, 1.12) }, { name: "抖动", data: buildReconstructionSeries(1.2, tick + 1, 8, 0.92) }] },
-      { title: "流媒体服务器", series: [{ name: "转码负荷", data: buildReconstructionSeries(1.6, tick + 2, 8, 1.04) }, { name: "缓存积压", data: buildReconstructionSeries(1.3, tick + 3, 8, 0.86) }] },
-      { title: "下行链路", series: [{ name: "QoE损失", data: buildReconstructionSeries(1.4, tick + 4, 8, 0.98) }, { name: "吞吐下降", data: buildReconstructionSeries(1.0, tick + 5, 8, 0.76) }] },
+      { title: "上行链路", subtitle: "SSRC: 0x9A2B31C4", series: [{ name: "丢包率", data: buildReconstructionSeries(1.5, tick, 8, 1.12) }, { name: "抖动", data: buildReconstructionSeries(1.2, tick + 1, 8, 0.92) }] },
+      { title: "流媒体服务器", subtitle: "BUPT-Media-01 (10.112.45.6)", series: [{ name: "转码负荷", data: buildReconstructionSeries(1.6, tick + 2, 8, 1.04) }, { name: "缓存积压", data: buildReconstructionSeries(1.3, tick + 3, 8, 0.86) }] },
+      { title: "下行链路", subtitle: "SSRC: 0x1F8E7D6A", series: [{ name: "QoE损失", data: buildReconstructionSeries(1.4, tick + 4, 8, 0.98) }, { name: "吞吐下降", data: buildReconstructionSeries(1.0, tick + 5, 8, 0.76) }] },
     ];
     return (
-      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
-        <div className="mb-[var(--layout-search-gap)] text-ui-medium font-bold text-[var(--color-text-main)]">异常指标：时空联合指标重构损失</div>
-        <div className="grid gap-[var(--layout-search-gap)] xl:grid-cols-3">
-          {charts.map((chart) => <ReconstructionChart key={chart.title} title={chart.title} series={chart.series} now={now} legendMode="compactGrid" />)}
+      <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)] flex flex-col flex-1 min-h-0">
+        <div className="mb-[var(--layout-search-gap)] text-ui-medium font-bold text-[var(--color-text-main)] shrink-0">异常指标：时空联合指标重构损失</div>
+        <div className="flex flex-col flex-1 justify-between gap-[var(--layout-search-gap)] h-full min-h-0">
+          {charts.map((chart) => <ReconstructionChart key={chart.title} title={chart.title} subtitle={chart.subtitle} series={chart.series} now={now} legendMode="verticalRight" />)}
         </div>
       </section>
     );
   }
 
   return (
-    <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+    <section className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)] flex flex-col flex-1">
       <div className="min-w-0">
         <div className="min-w-0">
           <div className="text-ui-medium font-bold text-[var(--color-text-main)]">异常指标：{alarm.metricName}</div>
         </div>
       </div>
-      <div className="mt-[var(--layout-search-gap)] min-w-0 overflow-hidden">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-[calc(var(--font-large)*6)] w-full">
+      <div className="mt-[var(--layout-search-gap)] min-w-0 overflow-hidden flex-1 flex flex-col justify-end">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full min-h-[140px]" preserveAspectRatio="none">
           <line x1={padLeft} x2={padLeft} y1={padTop} y2={height - padBottom} stroke="var(--color-panel-border)" />
           <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="var(--color-panel-border)" />
-          <text x={padLeft - 8} y={padTop + 5} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">{maxValue.toFixed(maxValue > 10 ? 0 : 1)}</text>
-          <text x={padLeft - 8} y={height - padBottom + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">0</text>
+          <text x={padLeft - 8} y={padTop + 5} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{maxValue.toFixed(maxValue > 10 ? 0 : 1)}</text>
+          <text x={padLeft - 8} y={height - padBottom + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">0</text>
           {showThreshold && (
             <>
               <line x1={padLeft} x2={width - padRight} y1={yFor(threshold)} y2={yFor(threshold)} stroke="var(--color-error-text)" strokeDasharray="5 5" opacity="0.55" />
-              <text x={width - padRight} y={yFor(threshold) - 5} textAnchor="end" fill="var(--color-error-text)" fontSize="var(--font-small)">阈值 {threshold}{alarm.metricUnit}</text>
+              <text x={width - padRight} y={yFor(threshold) - 5} textAnchor="end" fill="var(--color-error-text)" fontSize="var(--font-medium)">阈值 {threshold}{alarm.metricUnit}</text>
             </>
           )}
           <polyline points={area} fill="var(--color-error-text)" opacity="0.16" />
@@ -517,13 +520,15 @@ function MetricTrendChart({ alarm, algorithm, thresholds }) {
               <circle cx={xFor(index)} cy={yFor(item.value)} r="3.5" fill="var(--color-error-text)" />
             </g>
           ))}
-          <text x={(padLeft + width - padRight) / 2} y={height - 5} textAnchor="middle" fill="var(--color-text-muted)" fontSize="var(--font-small)">{formatShiftedClock(now, 30)}</text>
-          <text x={width - padRight} y={height - 5} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-small)">{formatClock(now)}</text>
+          <text x={(padLeft + width - padRight) / 2} y={height - 8} textAnchor="middle" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{formatShiftedClock(now, 30)}</text>
+          <text x={width - padRight} y={height - 8} textAnchor="end" fill="var(--color-text-muted)" fontSize="var(--font-medium)">{formatClock(now)}</text>
         </svg>
       </div>
     </section>
   );
 }
+
+
 
 function PollingConfigPanel({ scopeName, confirmStrategy, setConfirmStrategy, onClose }) {
   return (
@@ -784,103 +789,163 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   }, [handledMap]);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col gap-[var(--layout-content-gap)] bg-[var(--color-page-bg)] p-[var(--layout-content-padding)]">
-      <section className="rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
-        <div className="flex items-center gap-[var(--layout-content-gap)]">
-          <h1 className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">异常告警</h1>
-          <span className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-muted)]">{scopeText}</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-[var(--layout-search-height)] shrink-0 rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium text-[var(--color-text-main)] outline-none">
-            <option value="all">全部告警</option>
-            <option value="未确认">未确认</option>
-            <option value="已确认">已确认</option>
-            {anomalyTypeOptions.map((type) => (
-              <option key={type} value={`type:${type}`}>{type}</option>
-            ))}
-          </select>
-          <div className="flex min-h-[var(--layout-search-height)] w-[min(30rem,28vw)] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)]">
-            <Search size="var(--icon-search)" className="text-[var(--color-icon-muted)]" />
-            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索摄像机、异常类型、状态" className="min-w-0 flex-1 bg-transparent text-ui-medium outline-none" />
-          </div>
-        </div>
-      </section>
+    <>
+      {/* 注入全局的跑马灯动画样式 */}
+      <style>{`
+        @keyframes viot-auto-scroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .viot-scroll-container {
+          display: block;
+          width: 100%;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+        .viot-scroll-inner {
+          display: inline-block;
+          animation: viot-auto-scroll 12s linear infinite;
+        }
+        .viot-scroll-replica {
+          padding-left: 2rem;
+        }
+      `}</style>
 
-      <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-[var(--layout-content-gap)]">
-        <aside className="min-h-0 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)]">
-          {selectedAlarm ? (
-            <div className="space-y-[var(--layout-content-gap)]">
-              <div className="flex items-center justify-between gap-[var(--layout-search-gap)]">
-                <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
-                  <Bell size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
-                  <h2 className="max-w-[min(46rem,52vw)] truncate text-ui-large font-bold text-[var(--color-text-main)]" title={selectedAlarm.camera?.name}>{selectedAlarm.camera?.name || selectedAlarm.camera?.id}</h2>
+      <main className="flex min-w-0 flex-1 flex-col gap-[var(--layout-content-gap)] bg-[var(--color-page-bg)] p-[var(--layout-content-padding)]">
+        <section className="rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+          <div className="flex items-center gap-[var(--layout-content-gap)]">
+            <h1 className="shrink-0 text-ui-large font-bold text-[var(--color-text-main)]">异常告警</h1>
+            <span className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-muted)]">{scopeText}</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-[var(--layout-search-height)] shrink-0 rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium text-[var(--color-text-main)] outline-none">
+              <option value="all">全部告警</option>
+              <option value="未确认">未确认</option>
+              <option value="已确认">已确认</option>
+              {anomalyTypeOptions.map((type) => (
+                <option key={type} value={`type:${type}`}>{type}</option>
+              ))}
+            </select>
+            <div className="flex min-h-[var(--layout-search-height)] w-[min(30rem,28vw)] items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)]">
+              <Search size="var(--icon-search)" className="text-[var(--color-icon-muted)]" />
+              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索摄像机、异常类型、状态" className="min-w-0 flex-1 bg-transparent text-ui-medium outline-none" />
+            </div>
+          </div>
+        </section>
+
+        <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-[var(--layout-content-gap)]">
+          
+          {/* 左侧：告警信息与异常指标图表展示 */}
+          <aside className="min-h-0 flex flex-col overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)]">
+            {selectedAlarm ? (
+              <div className="flex flex-col flex-1 gap-[var(--layout-content-gap)] min-h-0">
+                <div className="flex items-center justify-between gap-[var(--layout-search-gap)] shrink-0">
+                  <div className="flex min-w-0 items-center gap-[var(--layout-search-gap)]">
+                    <Bell size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
+                    <h2 className="max-w-[min(46rem,52vw)] truncate text-ui-large font-bold text-[var(--color-text-main)]" title={selectedAlarm.camera?.name}>{selectedAlarm.camera?.name || selectedAlarm.camera?.id}</h2>
+                  </div>
                 </div>
-                <button type="button" onClick={() => onOpenCameraDiagnosis?.(selectedAlarm.camera)} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)]">
+                <div className="grid grid-cols-2 gap-[var(--layout-content-gap)] text-ui-medium shrink-0">
+                  <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">摄像机状态：{cameraStatusText(selectedAlarm.camera?.status)}</div>
+                  <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">告警状态：{selectedAlarm.status}</div>
+                </div>
+                <MetricTrendChart alarm={selectedAlarm} algorithm={algorithm} thresholds={thresholds} />
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-ui-medium text-[var(--color-text-muted)]"><CheckCircle2 size="var(--icon-topbar)" className="mr-[var(--layout-search-gap)] text-[var(--color-accent)]" /> 当前范围暂无告警</div>
+            )}
+          </aside>
+
+          {/* 右侧：视频预览与告警列表 */}
+          <div className="flex min-h-0 flex-col gap-[var(--layout-content-gap)]">
+            {/* 右侧上：视频预览窗口 */}
+            <div className="shrink-0 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)]">
+              <div className="flex items-center justify-between mb-[var(--layout-content-gap)]">
+                <h3 className="text-ui-medium font-bold text-[var(--color-text-main)]">
+                  视频预览窗口
+                </h3>
+                <button type="button" onClick={() => onOpenCameraDiagnosis?.(selectedAlarm.camera)} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-semibold text-[var(--color-topbar-active-text)] hover:bg-[var(--color-accent)] hover:text-white transition">
                   <Zap size="var(--icon-bottom)" /> 根因诊断
                 </button>
               </div>
-              <AlarmPreview alarm={selectedAlarm} />
-              <div className="grid grid-cols-2 gap-[var(--layout-content-gap)] text-ui-medium">
-                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">摄像机状态：{cameraStatusText(selectedAlarm.camera?.status)}</div>
-                <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">告警状态：{selectedAlarm.status}</div>
-              </div>
-              <MetricTrendChart alarm={selectedAlarm} algorithm={algorithm} thresholds={thresholds} />
+              {selectedAlarm ? (
+                <AlarmPreview alarm={selectedAlarm} />
+              ) : (
+                <div className="flex aspect-video items-center justify-center rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-ui-medium text-[var(--color-text-muted)]">
+                  暂无告警视频
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-ui-medium text-[var(--color-text-muted)]"><CheckCircle2 size="var(--icon-topbar)" className="mr-[var(--layout-search-gap)] text-[var(--color-accent)]" /> 当前范围暂无告警</div>
+
+            {/* 右侧下：告警列表 */}
+            <div className="min-h-0 flex-1 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
+              {loading ? (
+                <div className="flex h-full items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-muted)]"><Loader2 size="var(--icon-search)" className="animate-spin" /> 正在加载告警</div>
+              ) : (
+                <table className="w-full table-fixed border-separate border-spacing-0 text-left text-ui-medium">
+                  <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
+                    <tr>
+                      <th className="w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">告警时间</th>
+                      <th className="w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">告警摄像机</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">异常类型</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">当前状态</th>
+                      <th className="w-[5rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alarms.map((alarm) => (
+                      <tr key={alarm.id} onClick={() => setSelectedAlarm(alarm)} className={`cursor-pointer text-[var(--color-text-main)] ${selectedAlarm?.id === alarm.id ? "bg-[var(--color-hover-bg)]" : `${detectionRowClass(alarm.detectionTier)} hover:bg-[var(--color-hover-bg)]`}`}>
+                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <div className="viot-scroll-container w-full" title={alarm.time}>
+                            <div className="viot-scroll-inner">
+                              <span>{alarm.time}</span>
+                              <span className="viot-scroll-replica">{alarm.time}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <div className="viot-scroll-container w-full" title={alarm.source}>
+                            <div className="viot-scroll-inner">
+                              <span>{alarm.source}</span>
+                              <span className="viot-scroll-replica">{alarm.source}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
+                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${statusClass(alarm.status)}`}>{alarm.status}</span>
+                        </td>
+                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <button type="button" onClick={(event) => { event.stopPropagation(); toggleHandled(alarm); }} className="text-ui-small text-[var(--color-accent)] hover:underline">
+                            {alarm.status === "已确认" ? "取消确认" : "确认"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {showPollingConfig && (
+            <PollingConfigPanel
+              scopeName={scopeText.replace(/^当前范围：/, "")}
+              confirmStrategy={confirmStrategy}
+              setConfirmStrategy={setConfirmStrategy}
+              onClose={onClosePollingConfig}
+            />
           )}
-        </aside>
 
-        <div className="min-h-0 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
-          {loading ? (
-            <div className="flex h-full items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-muted)]"><Loader2 size="var(--icon-search)" className="animate-spin" /> 正在加载告警</div>
-          ) : (
-            <table className="w-max min-w-full border-separate border-spacing-0 text-left text-ui-medium">
-              <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
-                <tr>
-                  {["告警时间", "告警摄像机", "异常类型", "当前状态", "操作"].map((label) => (
-                    <th key={label} className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {alarms.map((alarm) => (
-                  <tr key={alarm.id} onClick={() => setSelectedAlarm(alarm)} className={`cursor-pointer text-[var(--color-text-main)] ${selectedAlarm?.id === alarm.id ? "bg-[var(--color-hover-bg)]" : `${detectionRowClass(alarm.detectionTier)} hover:bg-[var(--color-hover-bg)]`}`}>
-                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.time}</td>
-                    <td className="max-w-[28rem] truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]" title={alarm.source}>{alarm.source}</td>
-                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
-                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-                      <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${statusClass(alarm.status)}`}>{alarm.status}</span>
-                    </td>
-                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-                      <button type="button" onClick={(event) => { event.stopPropagation(); toggleHandled(alarm); }} className="text-ui-small text-[var(--color-accent)] hover:underline">
-                        {alarm.status === "已确认" ? "取消确认" : "确认"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {showAlarmConfig && (
+            <AlgorithmConfigPanel
+              algorithm={algorithm}
+              setAlgorithm={setAlgorithm}
+              thresholds={thresholds}
+              setThresholds={setThresholds}
+              onClose={onCloseAlarmConfig}
+            />
           )}
-        </div>
-
-        {showPollingConfig && (
-          <PollingConfigPanel
-            scopeName={scopeText.replace(/^当前范围：/, "")}
-            confirmStrategy={confirmStrategy}
-            setConfirmStrategy={setConfirmStrategy}
-            onClose={onClosePollingConfig}
-          />
-        )}
-
-        {showAlarmConfig && (
-          <AlgorithmConfigPanel
-            algorithm={algorithm}
-            setAlgorithm={setAlgorithm}
-            thresholds={thresholds}
-            setThresholds={setThresholds}
-            onClose={onCloseAlarmConfig}
-          />
-        )}
-      </section>
-    </main>
+        </section>
+      </main>
+    </>
   );
 }
