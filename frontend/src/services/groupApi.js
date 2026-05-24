@@ -6,7 +6,8 @@ export async function createGroup(data) {
 }
 
 export async function getGroupTree() {
-  const res = await request.get("/groups/tree");
+  // 【修复】增加 _t 时间戳，防止 Edge/Chrome 缓存 GET 请求导致删除后列表不刷新
+  const res = await request.get(`/groups/tree?_t=${Date.now()}`);
   return res.data;
 }
 

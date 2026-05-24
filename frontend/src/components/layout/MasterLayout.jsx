@@ -149,9 +149,84 @@ function makeCustomFolderNode({ id, name, regionCode, regionName, children = [] 
 
 function buildGroupNode(group) {
   const subGroups = (group.children || []).map(buildGroupNode);
-  const cameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
-  const onlineCameras = cameras.filter((c) => c.status !== "offline").length;
+  const rawCameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
+
+  const onlineCameras = rawCameras.filter((c) => c.status !== "offline").length;
   const onlineSub = subGroups.reduce((acc, g) => acc + (g.online || 0), 0);
+
+  // 【修复】彻底使用 window.Map 避免与 lucide-react 的 Map 图标组件冲突
+  const countyMap = new window.Map();
+
+  rawCameras.forEach(cam => {
+    const countyCode = cam.county_code || cam.countyCode || 'unknown_county';
+    const countyName = cam.county_name || cam.countyName || '未知区县';
+    const townCode = cam.town_code || cam.townCode || 'unknown_town';
+    const townName = cam.town_name || cam.townName || '未知街道';
+
+    if (!countyMap.has(countyCode)) {
+      countyMap.set(countyCode, {
+        id: `virtual-county-${group.id}-${countyCode}`,
+        nodeType: "region",
+        level: "county",
+        name: countyName,
+        // 【修复】内部子字典也需要使用 window.Map
+        childrenMap: new window.Map(),
+        cameras: [],
+        online: 0,
+        total: 0
+      });
+    }
+
+    const countyNode = countyMap.get(countyCode);
+    countyNode.total += 1;
+    if (cam.status !== 'offline') countyNode.online += 1;
+
+    if (!countyNode.childrenMap.has(townCode)) {
+      countyNode.childrenMap.set(townCode, {
+        id: `virtual-town-${group.id}-${townCode}`,
+        nodeType: "region",
+        level: "town",
+        name: townName,
+        cameras: [],
+        online: 0,
+        total: 0
+      });
+    }
+
+    const townNode = countyNode.childrenMap.get(townCode);
+    townNode.total += 1;
+    if (cam.status !== 'offline') townNode.online += 1;
+
+    townNode.cameras.push(cam);
+  });
+
+  const virtualRegionNodes = Array.from(countyMap.values()).map(county => {
+    const townNodes = Array.from(county.childrenMap.values()).map(town => {
+      return {
+        id: town.id,
+        nodeType: "region",
+        level: "town",
+        name: town.name,
+        online: town.online,
+        total: town.total,
+        isLeaf: false,
+        loaded: true,
+        children: town.cameras
+      };
+    });
+
+    return {
+      id: county.id,
+      nodeType: "region",
+      level: "county",
+      name: county.name,
+      online: county.online,
+      total: county.total,
+      isLeaf: false,
+      loaded: true,
+      children: townNodes
+    };
+  });
 
   return {
     id: `group-${group.id}`,
@@ -159,15 +234,14 @@ function buildGroupNode(group) {
     nodeType: "group",
     name: repairText(group.name || "未命名分组"),
     level: "group",
-    children: [...subGroups, ...cameras],
+    children: [...subGroups, ...virtualRegionNodes],
     loaded: true,
-    isLeaf: subGroups.length === 0 && cameras.length === 0,
+    isLeaf: subGroups.length === 0 && virtualRegionNodes.length === 0,
     online: onlineCameras + onlineSub,
-    total: group.camera_count ?? (cameras.length + subGroups.reduce((acc, g) => acc + (g.total || 0), 0)),
+    total: group.camera_count ?? (rawCameras.length + subGroups.reduce((acc, g) => acc + (g.total || 0), 0)),
     raw: group,
   };
 }
-
 
 
 function makeNodeId(item) {
@@ -493,6 +567,8 @@ function CreateGroupModal({ onClose, onSubmit }) {
   const [expandedRegions, setExpandedRegions] = useState(new Set());
   const [loadingNodeId, setLoadingNodeId] = useState("");
   const loadedNodesRef = useRef(new Set());
+  const [fetchingRegionId, setFetchingRegionId] = useState("");
+  const cameraMap = useRef(new window.Map());
 
   useEffect(() => {
     const loadTree = async () => {
@@ -540,6 +616,7 @@ function CreateGroupModal({ onClose, onSubmit }) {
         let children = [];
         if (node.level === "town") {
           const cameras = await getNavTreeCameras(node.region_code);
+          cameras.forEach(c => cameraMap.current.set(c.id || c.camera_id, c));
           children = cameras;
         } else {
           children = await getNavTreeChildren(node.region_code);
@@ -556,43 +633,72 @@ function CreateGroupModal({ onClose, onSubmit }) {
     }
   };
 
-  const collectCameraIds = (node) => {
-    const ids = [];
-    if (node.children) {
-      for (const child of node.children) {
-        if (child.node_type === "camera") {
-          ids.push(child.id);
-        } else {
-          ids.push(...collectCameraIds(child));
+  const getCameraCheckState = (node) => {
+    if (node.node_type === "camera") {
+      const isSelected = selectedCameraIds.includes(node.id);
+      return { checked: isSelected, indeterminate: false, count: isSelected ? 1 : 0 };
+    }
+
+    const total = node.total || 0;
+    if (total === 0) return { checked: false, indeterminate: false, count: 0 };
+
+    let selectedCount = 0;
+    for (const id of selectedCameraIds) {
+      const cam = cameraMap.current.get(id);
+      if (cam) {
+        const code = node.region_code;
+        if (
+          cam.town_code === code ||
+          cam.county_code === code ||
+          cam.city_code === code ||
+          cam.province_code === code ||
+          cam.region_code === code
+        ) {
+          selectedCount++;
         }
       }
     }
-    return ids;
-  };
 
-  const getCameraCheckState = (node) => {
-    const cameraIds = collectCameraIds(node);
-    if (cameraIds.length === 0) return { checked: false, indeterminate: false, count: 0 };
-    const selectedCount = cameraIds.filter((id) => selectedCameraIds.includes(id)).length;
     return {
-      checked: selectedCount === cameraIds.length,
-      indeterminate: selectedCount > 0 && selectedCount < cameraIds.length,
+      checked: selectedCount > 0 && selectedCount >= total,
+      indeterminate: selectedCount > 0 && selectedCount < total,
       count: selectedCount,
     };
   };
 
-  const toggleRegionSelect = (node) => {
-    const cameraIds = collectCameraIds(node);
-    if (cameraIds.length === 0) return;
-    const state = getCameraCheckState(node);
-    setSelectedCameraIds((prev) => {
-      if (state.checked) {
-        return prev.filter((id) => !cameraIds.includes(id));
-      }
-      const merged = new Set(prev);
-      for (const id of cameraIds) merged.add(id);
-      return [...merged];
-    });
+  const toggleRegionSelect = async (node) => {
+    if (node.node_type === "camera") {
+      toggleCamera(node.id);
+      return;
+    }
+
+    if (node.total === 0) return;
+
+    setFetchingRegionId(node.region_code);
+    try {
+      const cameras = await getNavTreeCameras(node.region_code, { limit: 5000 });
+      const cameraIds = [];
+      cameras.forEach((c) => {
+        const id = c.id || c.camera_id;
+        cameraMap.current.set(id, c);
+        cameraIds.push(id);
+      });
+
+      setSelectedCameraIds((prev) => {
+        const prevSet = new Set(prev);
+        const allSelected = cameraIds.every((id) => prevSet.has(id));
+        if (allSelected) {
+          cameraIds.forEach((id) => prevSet.delete(id));
+        } else {
+          cameraIds.forEach((id) => prevSet.add(id));
+        }
+        return [...prevSet];
+      });
+    } catch (err) {
+      console.error("加载行政区摄像机失败:", err);
+    } finally {
+      setFetchingRegionId("");
+    }
   };
 
   const handleSubmit = () => {
@@ -632,8 +738,11 @@ function CreateGroupModal({ onClose, onSubmit }) {
           <button
             onClick={() => toggleRegionSelect(node)}
             className="shrink-0 p-[2px]"
+            disabled={fetchingRegionId === node.region_code}
           >
-            {regionState.checked ? (
+            {fetchingRegionId === node.region_code ? (
+              <Loader2 size="var(--icon-tree-action)" className="animate-spin text-[var(--color-icon-muted)]" />
+            ) : regionState.checked ? (
               <Check size="var(--icon-tree-action)" className="text-[var(--color-accent)]" />
             ) : regionState.indeterminate ? (
               <span className="flex h-[14px] w-[14px] items-center justify-center rounded border border-[var(--color-accent)] bg-[var(--color-accent)]">
@@ -932,6 +1041,7 @@ function TreeNode({
           >
             <RefreshCw size="var(--icon-tree-action)" />
           </button>
+          
         )}
         {node.level === "town" && (
           <button
@@ -1588,16 +1698,56 @@ function Sidebar({
   };
 
   const handleDeleteGroup = async (groupId) => {
-    if (!window.confirm("确定要删除该分组吗？子分组将一并删除。")) return;
+      if (!window.confirm("确定要删除该分组吗？子分组将一并删除。")) return;
+      try {
+        try {
+          await deleteGroup(groupId);
+        } catch (deleteErr) {
+          // 【修复】如果后端返回 404，说明分组早就被删掉了（幽灵点击），我们直接放行，当作删除成功
+          if (deleteErr?.response?.status !== 404 && !String(deleteErr).includes("404")) {
+            throw deleteErr;
+          }
+        }
+        
+        // 重新拉取最新的无缓存分组树
+        const data = await getGroupTree();
+        setGroupTree(data.map(buildGroupNode));
+        setError("");
+      } catch (err) {
+        setError(err.message || "删除分组失败");
+      }
+    };
+
+  const handleClearAllGroups = async () => {
+    if (mode !== "group") return;
+
+    if (!window.confirm("危险操作：确定要彻底清空所有分组吗？此操作不可恢复。")) return;
+
     try {
-      await deleteGroup(groupId);
+      const topLevelGroups = groupTree.filter(node => node.nodeType === "group");
+
+      for (const group of topLevelGroups) {
+        try {
+          await deleteGroup(group.rawId);
+        } catch (err) {
+          if (err?.response?.status !== 404 && !String(err).includes("404")) throw err;
+        }
+      }
+
       const data = await getGroupTree();
       setGroupTree(data.map(buildGroupNode));
       setError("");
     } catch (err) {
-      setError(err.message || "删除分组失败");
+      setError(err.message || "清空全部分组失败");
     }
   };
+
+  useEffect(() => {
+    window.addEventListener("TRIGGER_CLEAR_GROUPS", handleClearAllGroups);
+    return () => window.removeEventListener("TRIGGER_CLEAR_GROUPS", handleClearAllGroups);
+  }, [handleClearAllGroups]);
+
+
 
   const handleCreateCustomFolder = (townNode) => {
     if (townNode.level !== "town") return;
@@ -1979,6 +2129,15 @@ function BottomBar({
           className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-reset-padding-x)] py-[var(--layout-reset-padding-y)] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]"
         >
           <RefreshCw size="var(--icon-bottom)" />
+        </button>
+
+        <button
+          type="button"
+          title="清空全部分组"
+          onClick={() => window.dispatchEvent(new Event("TRIGGER_CLEAR_GROUPS"))}
+          className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] px-[var(--layout-reset-padding-x)] py-[var(--layout-reset-padding-y)] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)]"
+        >
+          <Trash2 size="var(--icon-bottom)" />
         </button>
       </div>
 
