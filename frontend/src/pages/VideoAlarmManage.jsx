@@ -17,6 +17,25 @@ function writeAlarmConfirmState(value) {
   localStorage.setItem(ALARM_CONFIRM_STORAGE_KEY, JSON.stringify(value));
 }
 
+// ====== 新增：优先级本地存储与样式 ======
+const ALARM_PRIORITY_STORAGE_KEY = "viotops-alarm-priority-state-v1";
+
+function readAlarmPriorityState() {
+  try { return JSON.parse(localStorage.getItem(ALARM_PRIORITY_STORAGE_KEY) || "{}"); } catch { return {}; }
+}
+
+function writeAlarmPriorityState(value) {
+  localStorage.setItem(ALARM_PRIORITY_STORAGE_KEY, JSON.stringify(value));
+}
+
+// 遵循 tips.md，使用已有的 CSS 变量
+function priorityClass(priority) {
+  if (priority === "高") return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
+  if (priority === "中") return "border-[var(--color-text-main)] bg-[var(--color-hover-bg)] text-[var(--color-text-main)]";
+  if (priority === "低") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
+  return "border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-text-muted)]";
+}
+
 function cameraStatusText(status) {
   if (status === "online") return "正常";
   if (status === "fault") return "异常";
@@ -83,7 +102,52 @@ function AlarmStatusDropdown({ status, onChange }) {
   );
 }
 
+// ====== 新增：优先级下拉组件 ======
+function AlarmPriorityDropdown({ priority, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const options = ["未归类", "低", "中", "高"];
 
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className={`flex items-center gap-[var(--layout-tree-gap)] rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[2px] transition-colors hover:brightness-95 ${priorityClass(priority)}`}
+      >
+        <span>{priority}</span>
+        <ChevronDown size="14" className="opacity-70" />
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={(event) => { event.stopPropagation(); setIsOpen(false); }} />
+          <div className="absolute right-[calc(100%+6px)] top-1/2 -translate-y-1/2 z-50 flex w-[6rem] flex-col overflow-hidden rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+            {options.map((opt) => {
+              const textColor = priorityClass(opt).split(' ').find(c => c.startsWith('text-'));
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setIsOpen(false);
+                    if (opt !== priority) onChange(opt);
+                  }}
+                  className={`px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-center text-ui-small font-medium transition-colors hover:bg-[var(--color-hover-bg)] ${textColor}`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function detectionRowClass(tier) {
   if (tier === "strong") return "bg-red-300/45";
@@ -756,6 +820,9 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   const [keyword, setKeyword] = useState("");
   const [selectedAlarm, setSelectedAlarm] = useState(null);
   const [handledMap, setHandledMap] = useState(() => readAlarmConfirmState());
+  // ====== 新增：优先级映射映射字典 ======
+  const [priorityMap, setPriorityMap] = useState(() => readAlarmPriorityState());
+  
   const [statusFilter, setStatusFilter] = useState("all");
   const [algorithm, setAlgorithm] = useState("spatioTemporal");
   const [confirmStrategy, setConfirmStrategy] = useState("manual");
@@ -800,7 +867,9 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     if (alarmResetSeenRef.current === resetVersion) return;
     alarmResetSeenRef.current = resetVersion;
     localStorage.removeItem(ALARM_CONFIRM_STORAGE_KEY);
+    localStorage.removeItem(ALARM_PRIORITY_STORAGE_KEY); // 新增
     setHandledMap({});
+    setPriorityMap({}); // 新增
     setConfirmStrategy("manual");
     setStatusFilter("all");
   }, [resetVersion]);
@@ -815,7 +884,7 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   }, [algorithm]);
 
   const allAlarms = useMemo(() => {
-    // 【修复】将原本简单的 filter 逻辑更新为支持 targetCameraIds 校验
+    // ====== 修改这块 useMemo ======
     const scopedCameras = cameras.filter(camera => {
       if (cameraId) return camera.id === cameraId;
       if (targetCameraIds) return targetCameraIds.has(camera.id);
@@ -824,8 +893,15 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     
     const scopedIds = new Set(scopedCameras.map((camera) => camera.id));
     const scopedStreams = streams.filter((stream) => scopedIds.has(stream.camera_id));
-    return buildAlarms(scopedCameras, scopedStreams, handledMap, confirmStrategy, algorithm);
-  }, [cameras, streams, cameraId, targetCameraIds, handledMap, confirmStrategy, algorithm]); // 【注意】依赖项别忘了加上 targetCameraIds
+    
+    // 生成告警，并打上对应的优先级标记
+    const rawAlarms = buildAlarms(scopedCameras, scopedStreams, handledMap, confirmStrategy, algorithm);
+    return rawAlarms.map(alarm => ({
+      ...alarm,
+      priority: priorityMap[alarm.id] || "未归类"
+    }));
+  // 注意依赖项要加上 priorityMap
+  }, [cameras, streams, cameraId, targetCameraIds, handledMap, priorityMap, confirmStrategy, algorithm]);
 
   const anomalyTypeOptions = useMemo(
     () => Array.from(new Set(allAlarms.map((alarm) => alarm.type))).filter(Boolean),
@@ -862,9 +938,22 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     }));
   }
 
+  // 3. 在 updateAlarmStatus 函数下方新增 updateAlarmPriority 函数：
+  function updateAlarmPriority(alarm, newPriority) {
+    setPriorityMap((current) => ({
+      ...current,
+      [alarm.id]: newPriority,
+    }));
+  }
+
   useEffect(() => {
     writeAlarmConfirmState(handledMap);
   }, [handledMap]);
+  
+  // 新增
+  useEffect(() => {
+    writeAlarmPriorityState(priorityMap);
+  }, [priorityMap]);
 
   return (
     <>
@@ -886,6 +975,23 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
         }
         .viot-scroll-replica {
           padding-left: 2rem;
+        }
+
+        /* 新增：悬浮显示水平和垂直滚动条 */
+        .viot-hover-scroll::-webkit-scrollbar {
+          width: 8px;
+          height: 8px; /* 水平滚动条高度 */
+        }
+        .viot-hover-scroll::-webkit-scrollbar-thumb {
+          background-color: transparent; /* 默认透明隐藏 */
+          border-radius: 4px;
+          transition: background-color 0.3s;
+        }
+        .viot-hover-scroll:hover::-webkit-scrollbar-thumb {
+          background-color: rgba(150, 150, 150, 0.4); /* 鼠标移入时显示 */
+        }
+        .viot-hover-scroll::-webkit-scrollbar-track {
+          background: transparent;
         }
       `}</style>
 
@@ -954,24 +1060,28 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
             </div>
 
             {/* 右侧下：告警列表 */}
-            <div className="min-h-0 flex-1 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
+            {/* 1. 在容器增加 viot-hover-scroll 类名 */}
+            <div className="viot-hover-scroll min-h-0 flex-1 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
               {loading ? (
                 <div className="flex h-full items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-[var(--color-text-muted)]"><Loader2 size="var(--icon-search)" className="animate-spin" /> 正在加载告警</div>
               ) : (
-                <table className="w-full table-fixed border-separate border-spacing-0 text-left text-ui-medium">
+                <table className="w-full min-w-max table-auto border-separate border-spacing-0 text-left text-ui-medium">
                   <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
                     <tr>
-                      <th className="w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
-                      <th className="w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
+                      {/* 恢复并强化这两个字段的宽度限制 */}
+                      <th className="w-[10rem] max-w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
+                      <th className="w-[18rem] max-w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
                       <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件类型</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">优先级</th>
                       <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">状态</th>
-                      <th className="w-[5rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
                     </tr>
                   </thead>
                   <tbody>
                     {alarms.map((alarm) => (
                       <tr key={alarm.id} onClick={() => setSelectedAlarm(alarm)} className={`cursor-pointer text-[var(--color-text-main)] ${selectedAlarm?.id === alarm.id ? "bg-[var(--color-hover-bg)]" : `${detectionRowClass(alarm.detectionTier)} hover:bg-[var(--color-hover-bg)]`}`}>
-                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                        {/* 时间列 td */}
+                        <td className="w-[10rem] max-w-[10rem] border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                           <div className="viot-scroll-container w-full" title={alarm.time}>
                             <div className="viot-scroll-inner">
                               <span>{alarm.time}</span>
@@ -979,7 +1089,8 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                             </div>
                           </div>
                         </td>
-                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                        {/* 事件源列 td */}
+                        <td className="w-[18rem] max-w-[18rem] border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                           <div className="viot-scroll-container w-full" title={alarm.source}>
                             <div className="viot-scroll-inner">
                               <span>{alarm.source}</span>
@@ -987,7 +1098,15 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                             </div>
                           </div>
                         </td>
-                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
+                        <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
+                        
+                        {/* ====== 新增这一列，调用优先级下拉组件 ====== */}
+                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <AlarmPriorityDropdown 
+                            priority={alarm.priority} 
+                            onChange={(newPriority) => updateAlarmPriority(alarm, newPriority)} 
+                          />
+                        </td>
                         
                         <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                           <AlarmStatusDropdown 
@@ -995,7 +1114,7 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                             onChange={(newStatus) => updateAlarmStatus(alarm, newStatus)} 
                           />
                         </td>
-                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                        <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                           <button 
                             type="button" 
                             onClick={(event) => { 

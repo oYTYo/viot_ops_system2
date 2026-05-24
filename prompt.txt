@@ -1,139 +1,47 @@
-你是一名专业的web系统开发程序员，这里是我的系统代码，请你完整阅读之后给我具体修改方案。
+哦对，有两个例外，那就是前面的时间和事件源，它们的内容太长了，我专门用的跑马灯特效。所以请你告诉我如何给它们这两条单独设计宽度，然后其他字段都自适应。
 
+要让跑马灯列固定宽度，同时其他列继续保持自适应，只需要给这两列的 <th> 和 <td> 同时加上 w-[固定值] 和 max-w-[固定值]，以此强行限制跑马灯容器的无限伸展。
 
+请在 VideoAlarmManage.jsx 中修改表头和表体：
 
-我的需求：
-
-VideoAlarmManage.jsx定义了我系统的异常告警板块，目前我想对这个板块做出一些完善，首先是第一个：
-
-目前的告警列表，其中倒数第二列是当前状态，最后一列是操作，目前我们系统设置的操作就是确认，点击确认之后，当前状态会从“未确认”变成“已确认”。
-
-现在我要求你帮我完成一个优化，那就是把当前状态这一列的值，改成已处理和未处理，状态用气泡显示，点击气泡之后dropdown两个状态可以select，不需要额外一列来修改状态。
-
-
-
-然后原本系统列表最后一列的“操作”，从原本的确认按钮改成“详情”，点击之后也是弹出一个空白的弹窗，名称叫作事件详情，内容是后续开发。
-
-
-
-修改方案：
-
- 
-
-以下是针对 VideoAlarmManage.jsx 的具体修改方案。修改严格遵循了你的 tips.md 开发守则（复用 CSS 变量、Tailwind 样式）：
-
-1. 替换状态文本常量
-全局将“确认”变更为“处理”。修改以下几处函数中的硬编码文本：
-
-修改 statusClass 函数：
+1. 修改表头 (<thead>)
+给“时间”和“事件源”重新加上宽度限制，注意一定要加上 max-w-[...]：
 
 JavaScript
-function statusClass(status) {
-  // 原："已确认" -> 现："已处理"
-  if (status === "已处理") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
-  return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
-}
-修改 buildFlowerScreenAlarms 和 buildAlarms 函数中的 status 字段：
-
-JavaScript
-// 在两个函数中找到 status 的赋值，统一修改为：
-status: confirmStrategy === "auto" ? "已处理" : handledMap[id] || "未处理",
-
-
-2. 增加状态与状态更新逻辑
-在 VideoAlarmManage 组件内部，引入弹窗状态，并将原本的 toggleHandled 替换为可以直接指定状态的函数：
-
-JavaScript
-export default function VideoAlarmManage({ ... }) {
-  // ... 原有 state ...
+<tr>
+  {/* 恢复并强化这两个字段的宽度限制 */}
+  <th className="w-[10rem] max-w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
+  <th className="w-[18rem] max-w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
   
-  // 【新增】用于控制“详情”弹窗的 state
-  const [detailModalAlarm, setDetailModalAlarm] = useState(null);
-
-  // ...
-
-  // 【替换】将原有的 toggleHandled 替换为 updateAlarmStatus
-  function updateAlarmStatus(alarm, newStatus) {
-    setHandledMap((current) => ({
-      ...current,
-      [alarm.id]: newStatus,
-    }));
-  }
-  
-  // ...
-
-
-3. 修改状态筛选下拉框
-更新顶部栏的状态过滤选项文本：
+  {/* 后面的事件类型、优先级、状态、操作等列，保持只用 whitespace-nowrap，不写宽度 */}
+  <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件类型</th>
+  <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">优先级</th>
+  {/* ... 其他 th */}
+</tr>
+2. 修改表体 (<tbody>)
+在渲染跑马灯的 <td> 标签上，加上完全相同的宽度限制：
 
 JavaScript
-{/* 找到该 select 元素，修改 option 文本 */}
-<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} ... >
-  <option value="all">全部告警</option>
-  <option value="未处理">未处理</option>
-  <option value="已处理">已处理</option>
-  {anomalyTypeOptions.map((type) => (
-    <option key={type} value={`type:${type}`}>{type}</option>
-  ))}
-</select>
-
-
-4. 替换表格中的列渲染（核心需求）
-将原本呈现文本的 当前状态 列改为通过原生的气泡外观 <select> 实现无缝切换，同时将 操作 列改为“详情”按钮：
-
-JavaScript
-{/* 找到 tbody 中的原 td 渲染部分，替换最后两个 td： */}
-
-<td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-  {/* 使用 appearance-none 隐藏原生箭头，使其外观完全等同于一个气泡标签 */}
-  <select
-    value={alarm.status}
-    onClick={(event) => event.stopPropagation()}
-    onChange={(event) => updateAlarmStatus(alarm, event.target.value)}
-    className={`cursor-pointer appearance-none outline-none rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[1px] text-center font-medium ${statusClass(alarm.status)}`}
-  >
-    <option value="未处理">未处理</option>
-    <option value="已处理">已处理</option>
-  </select>
-</td>
-<td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-  <button 
-    type="button" 
-    onClick={(event) => { 
-      event.stopPropagation(); 
-      setDetailModalAlarm(alarm); 
-    }} 
-    className="text-ui-small text-[var(--color-accent)] hover:underline"
-  >
-    详情
-  </button>
+{/* 时间列 td */}
+<td className="w-[10rem] max-w-[10rem] border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+  <div className="viot-scroll-container w-full" title={alarm.time}>
+    <div className="viot-scroll-inner">
+      <span>{alarm.time}</span>
+      <span className="viot-scroll-replica">{alarm.time}</span>
+    </div>
+  </div>
 </td>
 
+{/* 事件源列 td */}
+<td className="w-[18rem] max-w-[18rem] border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+  <div className="viot-scroll-container w-full" title={alarm.source}>
+    <div className="viot-scroll-inner">
+      <span>{alarm.source}</span>
+      <span className="viot-scroll-replica">{alarm.source}</span>
+    </div>
+  </div>
+</td>
 
-
-5. 补充事件详情弹窗结构
-在 VideoAlarmManage 组件的末尾（在最后的 </main> 或 </> 闭合标签之前），添加弹窗 JSX：
-
-JavaScript
-      {/* 补充到 </main> 结束标签的前面 */}
-      
-      {/* 【新增】事件详情弹窗 */}
-      {detailModalAlarm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35">
-          <div className="w-[min(40rem,calc(100%-var(--layout-content-padding)*2))] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
-            <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
-              <div className="text-ui-large font-bold text-[var(--color-text-main)]">事件详情</div>
-              <button 
-                type="button" 
-                onClick={() => setDetailModalAlarm(null)} 
-                className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"
-              >
-                <X size="var(--icon-topbar)" />
-              </button>
-            </header>
-            <div className="min-h-[12rem] p-[var(--layout-content-padding)] text-ui-medium text-[var(--color-text-muted)] flex items-center justify-center">
-              后续开发
-            </div>
-          </div>
-        </div>
-      )}
+{/* 后面的 td 保持原样，仅用 whitespace-nowrap */}
+<td className="whitespace-nowrap border-b ...">{alarm.type}</td>
+这样，前两列会被死死锁在 10rem 和 18rem，多余的文字会在 viot-scroll-container 内部滚动；而后面的列依然会根据文字长短完美自适应。
