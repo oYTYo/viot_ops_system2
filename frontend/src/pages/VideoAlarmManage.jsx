@@ -25,7 +25,7 @@ function cameraStatusText(status) {
 }
 
 function statusClass(status) {
-  if (status === "已确认") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
+  if (status === "已处理") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
   return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
 }
 
@@ -182,7 +182,7 @@ function buildFlowerScreenAlarms(cameras, streams, handledMap, confirmStrategy, 
         time: new Date(Date.now() - 1000 * 60 * (18 + index * 7)).toLocaleString("zh-CN", { hour12: false }),
         source: camera.name || camera.id,
         type: "画面花屏",
-        status: confirmStrategy === "auto" ? "已确认" : handledMap[id] || "未确认",
+        status: confirmStrategy === "auto" ? "已处理" : handledMap[id] || "未处理",
         metric: algorithm === "rule"
           ? `丢包率 ${packetLoss.toFixed(2)}%，超过规则阈值`
           : algorithm === "algorithmA"
@@ -225,7 +225,7 @@ function buildAlarms(cameras, streams, handledMap, confirmStrategy, algorithm) {
         time: new Date(Date.now() - (camera.status === "offline" ? 1000 * 60 * 12 : 1000 * 60 * 38)).toLocaleString("zh-CN", { hour12: false }),
         source: camera.name || camera.id,
         type: anomaly.type,
-        status: confirmStrategy === "auto" ? "已确认" : handledMap[id] || "未确认",
+        status: confirmStrategy === "auto" ? "已处理" : handledMap[id] || "未处理",
         metric: anomaly.metric,
         metricName: anomaly.metricName,
         metricUnit: anomaly.metricUnit,
@@ -711,6 +711,7 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     丢包率: 1.5,
   });
   const [loading, setLoading] = useState(false);
+  const [detailModalAlarm, setDetailModalAlarm] = useState(null);
   const alarmResetSeenRef = useRef(resetVersion);
   const algorithmLoadSeenRef = useRef(algorithm);
 
@@ -798,10 +799,10 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
         : `当前行政区：${focusTarget.name}`) 
     : "当前范围：全部区域";
 
-  function toggleHandled(alarm) {
+  function updateAlarmStatus(alarm, newStatus) {
     setHandledMap((current) => ({
       ...current,
-      [alarm.id]: alarm.status === "已确认" ? "未确认" : "已确认",
+      [alarm.id]: newStatus,
     }));
   }
 
@@ -839,8 +840,8 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
             <span className="min-w-0 flex-1 truncate text-ui-medium text-[var(--color-text-muted)]">{scopeText}</span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-[var(--layout-search-height)] shrink-0 rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] text-ui-medium text-[var(--color-text-main)] outline-none">
               <option value="all">全部告警</option>
-              <option value="未确认">未确认</option>
-              <option value="已确认">已确认</option>
+              <option value="未处理">未处理</option>
+              <option value="已处理">已处理</option>
               {anomalyTypeOptions.map((type) => (
                 <option key={type} value={`type:${type}`}>{type}</option>
               ))}
@@ -907,7 +908,7 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                       <th className="w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
                       <th className="w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
                       <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件类型</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">当前状态</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">状态</th>
                       <th className="w-[5rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
                     </tr>
                   </thead>
@@ -932,11 +933,26 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                         </td>
                         <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
                         <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-                          <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${statusClass(alarm.status)}`}>{alarm.status}</span>
+                          <select
+                            value={alarm.status}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => updateAlarmStatus(alarm, event.target.value)}
+                            className={`cursor-pointer appearance-none outline-none rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[1px] text-center font-medium ${statusClass(alarm.status)}`}
+                          >
+                            <option value="未处理">未处理</option>
+                            <option value="已处理">已处理</option>
+                          </select>
                         </td>
                         <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-                          <button type="button" onClick={(event) => { event.stopPropagation(); toggleHandled(alarm); }} className="text-ui-small text-[var(--color-accent)] hover:underline">
-                            {alarm.status === "已确认" ? "取消确认" : "确认"}
+                          <button 
+                            type="button" 
+                            onClick={(event) => { 
+                              event.stopPropagation(); 
+                              setDetailModalAlarm(alarm); 
+                            }} 
+                            className="text-ui-small text-[var(--color-accent)] hover:underline"
+                          >
+                            详情
                           </button>
                         </td>
                       </tr>
@@ -967,6 +983,27 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
           )}
         </section>
       </main>
+
+      {/* 【新增】事件详情弹窗 */}
+      {detailModalAlarm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35">
+          <div className="w-[min(40rem,calc(100%-var(--layout-content-padding)*2))] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+            <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+              <div className="text-ui-large font-bold text-[var(--color-text-main)]">事件详情</div>
+              <button 
+                type="button" 
+                onClick={() => setDetailModalAlarm(null)} 
+                className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"
+              >
+                <X size="var(--icon-topbar)" />
+              </button>
+            </header>
+            <div className="min-h-[12rem] p-[var(--layout-content-padding)] text-ui-medium text-[var(--color-text-muted)] flex items-center justify-center">
+              后续开发
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

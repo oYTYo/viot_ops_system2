@@ -1,143 +1,139 @@
-很好，你成功实现了分组和右侧内容区的联动。接下来还有一件事，我发现分组栏里面有一个小功能没有实现完善，那就是在乡级行政区之下新建自定义文件夹。当我在分组里自定义文件夹，保存之后在分组里不会显示。相反，当我切换到收藏里面，发现文件夹竟然被保存在收藏里面了。我需要你定位到这个现象产生的原因，然后给我一个具体修改方案，让分组和收藏各自保存自己新建的自定义文件夹。 
-
-这个现象产生的根本原因在于，自定义文件夹的生命周期函数（新建、删除、拖拽）都硬编码绑定到了全局的 customFolders 状态中，且母版在渲染“分组”树（groupTree）时，压根没有调用 attachCustomFoldersToTree 去挂载这些文件夹。由于 customFolders 只被挂载到了“行政区”和“收藏”树上，导致在分组里创建的文件夹跑到了收藏里。
-
-请在 frontend/src/components/layout/MasterLayout.jsx 中进行如下三步修改，即可让分组和收藏各自独立维护自定义文件夹：
+你是一名专业的web系统开发程序员，这里是我的系统代码，请你完整阅读之后给我具体修改方案。
 
 
 
-1. 声明分组专属的存储 Key 和状态
-在 MasterLayout.jsx 的文件顶部常量区以及 Sidebar 组件内部，追加分组专属的状态及持久化监听：
+我的需求：
+
+VideoAlarmManage.jsx定义了我系统的异常告警板块，目前我想对这个板块做出一些完善，首先是第一个：
+
+目前的告警列表，其中倒数第二列是当前状态，最后一列是操作，目前我们系统设置的操作就是确认，点击确认之后，当前状态会从“未确认”变成“已确认”。
+
+现在我要求你帮我完成一个优化，那就是把当前状态这一列的值，改成已处理和未处理，状态用气泡显示，点击气泡之后dropdown两个状态可以select，不需要额外一列来修改状态。
+
+
+
+然后原本系统列表最后一列的“操作”，从原本的确认按钮改成“详情”，点击之后也是弹出一个空白的弹窗，名称叫作事件详情，内容是后续开发。
+
+
+
+修改方案：
+
+ 
+
+以下是针对 VideoAlarmManage.jsx 的具体修改方案。修改严格遵循了你的 tips.md 开发守则（复用 CSS 变量、Tailwind 样式）：
+
+1. 替换状态文本常量
+全局将“确认”变更为“处理”。修改以下几处函数中的硬编码文本：
+
+修改 statusClass 函数：
 
 JavaScript
-// 1. 在文件顶部 FAVORITES_STORAGE_KEY 附近追加：
-const GROUP_CUSTOM_FOLDERS_STORAGE_KEY = "viot-group-custom-folders-v1";
-
-function readGroupCustomFolders() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY) || "{}");
-    return Object.fromEntries(Object.entries(stored).map(([key, value]) => [key, repairStoredNode(value)]));
-  } catch { return {}; }
+function statusClass(status) {
+  // 原："已确认" -> 现："已处理"
+  if (status === "已处理") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
+  return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
 }
-
-
-
-// 2. 在 Sidebar 组件内部，初始化状态区域追加：
-const [groupCustomFolders, setGroupCustomFolders] = useState(readGroupCustomFolders);
-
-useEffect(() => {
-  try {
-    localStorage.setItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY, JSON.stringify(groupCustomFolders));
-  } catch (error) { console.error("Failed to save group custom folders:", error); }
-}, [groupCustomFolders]);
-2. 让行为函数根据当前模式（mode）进行状态路由
-定位到 Sidebar 组件内的 handleCreateCustomFolder、handleDropCameraToCustomFolder、handleDeleteCustomFolder 和 handleRemoveCameraFromCustomFolder 四个业务函数，利用 mode === "group" 区分操作目标：
+修改 buildFlowerScreenAlarms 和 buildAlarms 函数中的 status 字段：
 
 JavaScript
-// 修改新建逻辑
-const handleCreateCustomFolder = (townNode) => {
-  if (townNode.level !== "town") return;
-  const name = window.prompt("请输入自定义文件夹名称", `${townNode.name}自定义分组`);
-  const trimmedName = name?.trim();
-  if (!trimmedName) return;
-
-  const id = `custom-folder-${townNode.regionCode}-${Date.now()}`;
-  const newNode = makeCustomFolderNode({
-    id, name: trimmedName, regionCode: townNode.regionCode, regionName: townNode.name, parentId: townNode.id, children: [],
-  });
-
-  if (mode === "group") {
-    setGroupCustomFolders(prev => ({ ...prev, [id]: newNode }));
-  } else {
-    setCustomFolders(prev => ({ ...prev, [id]: newNode }));
-  }
-  setNodeExpanded(townNode.id, true);
-};
-
-// 修改拖拽落点逻辑
-const handleDropCameraToCustomFolder = (folderNode, cameraNode) => {
-  const camera = normalizeCameraForCustomFolder(cameraNode);
-  if (!camera.cameraId) return;
-
-  let updatedFolder = null;
-  const updateCache = (prev) => {
-    const folder = prev[folderNode.id];
-    if (!folder) return prev;
-    const children = Array.isArray(folder.children) ? folder.children : [];
-    if (children.some((item) => normalizeCameraForCustomFolder(item).cameraId === camera.cameraId)) return prev;
-    updatedFolder = makeCustomFolderNode({ ...folder, children: [...children, camera] });
-    return { ...prev, [folderNode.id]: updatedFolder };
-  };
-
-  if (mode === "group") {
-    setGroupCustomFolders(updateCache);
-  } else {
-    setCustomFolders(updateCache);
-    setFavoriteNodes((prev) => {
-      if (!updatedFolder || !prev[folderNode.id]) return prev;
-      return { ...prev, [folderNode.id]: toFavoriteNode(updatedFolder) };
-    });
-  }
-  setNodeExpanded(folderNode.id, true);
-};
-
-// 修改删除逻辑
-const handleDeleteCustomFolder = (folderNode) => {
-  if (folderNode.nodeType !== "custom_folder") return;
-  if (!window.confirm(`确定删除自定义文件夹“${folderNode.name}”吗？`)) return;
-
-  if (mode === "group") {
-    setGroupCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
-  } else {
-    setCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
-    setFavoriteNodes(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
-  }
-  setNodeExpanded(folderNode.id, false);
-};
-
-// 修改移出摄像机逻辑
-const handleRemoveCameraFromCustomFolder = (folderId, cameraNode) => {
-  const camera = normalizeCameraForCustomFolder(cameraNode);
-  if (!camera.cameraId) return;
-
-  let updatedFolder = null;
-  const removeCache = (prev) => {
-    const folder = prev[folderId];
-    if (!folder) return prev;
-    const children = (folder.children || []).map(normalizeCameraForCustomFolder).filter((item) => item.cameraId !== camera.cameraId);
-    updatedFolder = makeCustomFolderNode({ ...folder, children });
-    return { ...prev, [folderId]: updatedFolder };
-  };
-
-  if (mode === "group") {
-    setGroupCustomFolders(removeCache);
-  } else {
-    setCustomFolders(removeCache);
-    setFavoriteNodes((prev) => {
-      if (!updatedFolder || !prev[folderId]) return prev;
-      return { ...prev, [folderId]: toFavoriteNode(updatedFolder) };
-    });
-  }
-};
+// 在两个函数中找到 status 的赋值，统一修改为：
+status: confirmStrategy === "auto" ? "已处理" : handledMap[id] || "未处理",
 
 
-3. 将独立的分组文件夹挂载到分组树上
-定位到组件内部的 rawTree 变量计算块（useMemo），在 mode === "group" 的分支中调用挂载函数，并补全依赖项：
+2. 增加状态与状态更新逻辑
+在 VideoAlarmManage 组件内部，引入弹窗状态，并将原本的 toggleHandled 替换为可以直接指定状态的函数：
 
 JavaScript
-// 修改 rawTree 的 useMemo 逻辑
-const rawTree = useMemo(() => {
-  if (mode === "group") {
-    // 【修改】将分组专属的文件夹树附加到 groupTree 上
-    return attachCustomFoldersToTree(groupTree, groupCustomFolders);
-  }
+export default function VideoAlarmManage({ ... }) {
+  // ... 原有 state ...
+  
+  // 【新增】用于控制“详情”弹窗的 state
+  const [detailModalAlarm, setDetailModalAlarm] = useState(null);
 
-  if (mode === "favorite") {
-    const sourceNodes = favoriteDisplayNodes.length > 0 ? favoriteDisplayNodes : Object.values(favoriteNodes);
-    return attachCustomFoldersToTree(sourceNodes, customFolders)
-      .map((node) => filterFavoriteNodeByStatus(node, cameraStatusFilter))
-      .filter(Boolean);
-  }
+  // ...
 
-  return attachCustomFoldersToTree(tree, customFolders);
-}, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter, customFolders, groupTree, groupCustomFolders]); // 【注意】加入了 groupCustomFolders 依赖
+  // 【替换】将原有的 toggleHandled 替换为 updateAlarmStatus
+  function updateAlarmStatus(alarm, newStatus) {
+    setHandledMap((current) => ({
+      ...current,
+      [alarm.id]: newStatus,
+    }));
+  }
+  
+  // ...
+
+
+3. 修改状态筛选下拉框
+更新顶部栏的状态过滤选项文本：
+
+JavaScript
+{/* 找到该 select 元素，修改 option 文本 */}
+<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} ... >
+  <option value="all">全部告警</option>
+  <option value="未处理">未处理</option>
+  <option value="已处理">已处理</option>
+  {anomalyTypeOptions.map((type) => (
+    <option key={type} value={`type:${type}`}>{type}</option>
+  ))}
+</select>
+
+
+4. 替换表格中的列渲染（核心需求）
+将原本呈现文本的 当前状态 列改为通过原生的气泡外观 <select> 实现无缝切换，同时将 操作 列改为“详情”按钮：
+
+JavaScript
+{/* 找到 tbody 中的原 td 渲染部分，替换最后两个 td： */}
+
+<td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+  {/* 使用 appearance-none 隐藏原生箭头，使其外观完全等同于一个气泡标签 */}
+  <select
+    value={alarm.status}
+    onClick={(event) => event.stopPropagation()}
+    onChange={(event) => updateAlarmStatus(alarm, event.target.value)}
+    className={`cursor-pointer appearance-none outline-none rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[1px] text-center font-medium ${statusClass(alarm.status)}`}
+  >
+    <option value="未处理">未处理</option>
+    <option value="已处理">已处理</option>
+  </select>
+</td>
+<td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+  <button 
+    type="button" 
+    onClick={(event) => { 
+      event.stopPropagation(); 
+      setDetailModalAlarm(alarm); 
+    }} 
+    className="text-ui-small text-[var(--color-accent)] hover:underline"
+  >
+    详情
+  </button>
+</td>
+
+
+
+5. 补充事件详情弹窗结构
+在 VideoAlarmManage 组件的末尾（在最后的 </main> 或 </> 闭合标签之前），添加弹窗 JSX：
+
+JavaScript
+      {/* 补充到 </main> 结束标签的前面 */}
+      
+      {/* 【新增】事件详情弹窗 */}
+      {detailModalAlarm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35">
+          <div className="w-[min(40rem,calc(100%-var(--layout-content-padding)*2))] rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+            <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+              <div className="text-ui-large font-bold text-[var(--color-text-main)]">事件详情</div>
+              <button 
+                type="button" 
+                onClick={() => setDetailModalAlarm(null)} 
+                className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"
+              >
+                <X size="var(--icon-topbar)" />
+              </button>
+            </header>
+            <div className="min-h-[12rem] p-[var(--layout-content-padding)] text-ui-medium text-[var(--color-text-muted)] flex items-center justify-center">
+              后续开发
+            </div>
+          </div>
+        </div>
+      )}
