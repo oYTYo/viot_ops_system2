@@ -384,8 +384,9 @@ function OperationMetricsPanel({ focusTarget, onNavigateToDevice }) {
   const scopeParams = useMemo(() => {
     if (!focusTarget) return {};
     if (focusTarget.nodeType === "camera" && focusTarget.cameraId) return { camera_id: focusTarget.cameraId };
-    if (focusTarget.nodeType === "custom_folder") {
-      const cameraIds = (focusTarget.children || [])
+    if (focusTarget.nodeType === "custom_folder" || focusTarget.nodeType === "group") { // 【修复】增加对 group 的判断
+      const sourceCameras = focusTarget.nodeType === "group" ? (focusTarget.flatCameras || []) : (focusTarget.children || []);
+      const cameraIds = sourceCameras
         .map((camera) => getCameraId(camera))
         .filter(Boolean);
       return cameraIds.length ? { camera_ids: cameraIds.join(",") } : {};
@@ -564,7 +565,9 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
     const AMap = amapRef.current;
     if (!AMap || !mapRef.current) return;
 
-    const cameras = (folder.children || []).filter(hasLngLat);
+    // 【修复】兼容 group 的 flatCameras 和 custom_folder 的 children
+    const sourceCameras = folder.nodeType === "group" ? (folder.flatCameras || []) : (folder.children || []);
+    const cameras = sourceCameras.filter(hasLngLat);
     focusedCameraIdRef.current = "";
     cachedMapViewState = {
       mode: "custom_folder",
@@ -822,7 +825,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
     const task =
       focusTarget.nodeType === "camera"
         ? focusCamera(focusTarget)
-        : focusTarget.nodeType === "custom_folder"
+        : (focusTarget.nodeType === "custom_folder" || focusTarget.nodeType === "group") // 【修复】增加对 group 的拦截
         ? renderCustomFolderCameras(focusTarget)
         : focusRegion(focusTarget);
 

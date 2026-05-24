@@ -47,6 +47,14 @@ import {
 
 const FAVORITES_STORAGE_KEY = "viot-favorite-region-nodes-v2";
 const CUSTOM_FOLDERS_STORAGE_KEY = "viot-custom-camera-folders-v1";
+const GROUP_CUSTOM_FOLDERS_STORAGE_KEY = "viot-group-custom-folders-v1";
+
+function readGroupCustomFolders() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY) || "{}");
+    return Object.fromEntries(Object.entries(stored).map(([key, value]) => [key, repairStoredNode(value)]));
+  } catch { return {}; }
+}
 
 const COUNTRY_NODE_ID = "country-100000-cn";
 
@@ -151,6 +159,10 @@ function buildGroupNode(group) {
   const subGroups = (group.children || []).map(buildGroupNode);
   const rawCameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
 
+  // 【新增】递归收集该分组下所有的摄像机列表，方便传递给右侧面板联动
+  const flatCameras = [...rawCameras];
+  subGroups.forEach(sg => flatCameras.push(...(sg.flatCameras || [])));
+
   const onlineCameras = rawCameras.filter((c) => c.status !== "offline").length;
   const onlineSub = subGroups.reduce((acc, g) => acc + (g.online || 0), 0);
 
@@ -169,6 +181,7 @@ function buildGroupNode(group) {
         nodeType: "region",
         level: "county",
         name: countyName,
+        regionCode: countyCode, // 【修复】补上至关重要的 regionCode
         // 【修复】内部子字典也需要使用 window.Map
         childrenMap: new window.Map(),
         cameras: [],
@@ -187,6 +200,7 @@ function buildGroupNode(group) {
         nodeType: "region",
         level: "town",
         name: townName,
+        regionCode: townCode, // 【修复】补上至关重要的 regionCode
         cameras: [],
         online: 0,
         total: 0
@@ -207,6 +221,7 @@ function buildGroupNode(group) {
         nodeType: "region",
         level: "town",
         name: town.name,
+        regionCode: town.regionCode, // 【修复】映射 regionCode
         online: town.online,
         total: town.total,
         isLeaf: false,
@@ -220,6 +235,7 @@ function buildGroupNode(group) {
       nodeType: "region",
       level: "county",
       name: county.name,
+      regionCode: county.regionCode, // 【修复】映射 regionCode
       online: county.online,
       total: county.total,
       isLeaf: false,
@@ -235,6 +251,7 @@ function buildGroupNode(group) {
     name: repairText(group.name || "未命名分组"),
     level: "group",
     children: [...subGroups, ...virtualRegionNodes],
+    flatCameras, // 【新增】将拍平后的摄像机暴露给外部
     loaded: true,
     isLeaf: subGroups.length === 0 && virtualRegionNodes.length === 0,
     online: onlineCameras + onlineSub,
@@ -1144,6 +1161,7 @@ function Sidebar({
   const [tree, setTree] = useState([]);
   const [favoriteNodes, setFavoriteNodes] = useState(readFavoriteNodes);
   const [customFolders, setCustomFolders] = useState(readCustomFolders);
+  const [groupCustomFolders, setGroupCustomFolders] = useState(readGroupCustomFolders);
   const [loadingRoot, setLoadingRoot] = useState(false);
   const [loadingNodeId, setLoadingNodeId] = useState("");
   const [error, setError] = useState("");
@@ -1463,6 +1481,12 @@ function Sidebar({
     }
   }, [customFolders]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY, JSON.stringify(groupCustomFolders));
+    } catch (error) { console.error("Failed to save group custom folders:", error); }
+  }, [groupCustomFolders]);
+
 
 
 
@@ -1756,17 +1780,20 @@ function Sidebar({
     if (!trimmedName) return;
 
     const id = `custom-folder-${townNode.regionCode}-${Date.now()}`;
-    setCustomFolders((prev) => ({
-      ...prev,
-      [id]: makeCustomFolderNode({
-        id,
-        name: trimmedName,
-        regionCode: townNode.regionCode,
-        regionName: townNode.name,
-        parentId: townNode.id,
-        children: [],
-      }),
-    }));
+    const newNode = makeCustomFolderNode({
+      id,
+      name: trimmedName,
+      regionCode: townNode.regionCode,
+      regionName: townNode.name,
+      parentId: townNode.id,
+      children: [],
+    });
+
+    if (mode === "group") {
+      setGroupCustomFolders(prev => ({ ...prev, [id]: newNode }));
+    } else {
+      setCustomFolders(prev => ({ ...prev, [id]: newNode }));
+    }
     setNodeExpanded(townNode.id, true);
     setError("");
   };
@@ -1776,49 +1803,37 @@ function Sidebar({
     if (!camera.cameraId) return;
 
     let updatedFolder = null;
-    setCustomFolders((prev) => {
+    const updateCache = (prev) => {
       const folder = prev[folderNode.id];
       if (!folder) return prev;
       const children = Array.isArray(folder.children) ? folder.children : [];
-      if (children.some((item) => normalizeCameraForCustomFolder(item).cameraId === camera.cameraId)) {
-        return prev;
-      }
-      updatedFolder = makeCustomFolderNode({
-        ...folder,
-        children: [...children, camera],
-      });
-      return {
-        ...prev,
-        [folderNode.id]: updatedFolder,
-      };
-    });
+      if (children.some((item) => normalizeCameraForCustomFolder(item).cameraId === camera.cameraId)) return prev;
+      updatedFolder = makeCustomFolderNode({ ...folder, children: [...children, camera] });
+      return { ...prev, [folderNode.id]: updatedFolder };
+    };
 
-    setFavoriteNodes((prev) => {
-      if (!updatedFolder || !prev[folderNode.id]) return prev;
-      return {
-        ...prev,
-        [folderNode.id]: toFavoriteNode(updatedFolder),
-      };
-    });
+    if (mode === "group") {
+      setGroupCustomFolders(updateCache);
+    } else {
+      setCustomFolders(updateCache);
+      setFavoriteNodes((prev) => {
+        if (!updatedFolder || !prev[folderNode.id]) return prev;
+        return { ...prev, [folderNode.id]: toFavoriteNode(updatedFolder) };
+      });
+    }
     setNodeExpanded(folderNode.id, true);
   };
 
   const handleDeleteCustomFolder = (folderNode) => {
     if (folderNode.nodeType !== "custom_folder") return;
-    const confirmed = window.confirm(`确定删除自定义文件夹“${folderNode.name}”吗？`);
-    if (!confirmed) return;
+    if (!window.confirm(`确定删除自定义文件夹"${folderNode.name}"吗？`)) return;
 
-    setCustomFolders((prev) => {
-      const next = { ...prev };
-      delete next[folderNode.id];
-      return next;
-    });
-    setFavoriteNodes((prev) => {
-      if (!prev[folderNode.id]) return prev;
-      const next = { ...prev };
-      delete next[folderNode.id];
-      return next;
-    });
+    if (mode === "group") {
+      setGroupCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+    } else {
+      setCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+      setFavoriteNodes(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+    }
     setNodeExpanded(folderNode.id, false);
   };
 
@@ -1827,34 +1842,28 @@ function Sidebar({
     if (!camera.cameraId) return;
 
     let updatedFolder = null;
-    setCustomFolders((prev) => {
+    const removeCache = (prev) => {
       const folder = prev[folderId];
       if (!folder) return prev;
-      const children = (folder.children || [])
-        .map(normalizeCameraForCustomFolder)
-        .filter((item) => item.cameraId !== camera.cameraId);
-      updatedFolder = makeCustomFolderNode({
-        ...folder,
-        children,
-      });
-      return {
-        ...prev,
-        [folderId]: updatedFolder,
-      };
-    });
+      const children = (folder.children || []).map(normalizeCameraForCustomFolder).filter((item) => item.cameraId !== camera.cameraId);
+      updatedFolder = makeCustomFolderNode({ ...folder, children });
+      return { ...prev, [folderId]: updatedFolder };
+    };
 
-    setFavoriteNodes((prev) => {
-      if (!updatedFolder || !prev[folderId]) return prev;
-      return {
-        ...prev,
-        [folderId]: toFavoriteNode(updatedFolder),
-      };
-    });
+    if (mode === "group") {
+      setGroupCustomFolders(removeCache);
+    } else {
+      setCustomFolders(removeCache);
+      setFavoriteNodes((prev) => {
+        if (!updatedFolder || !prev[folderId]) return prev;
+        return { ...prev, [folderId]: toFavoriteNode(updatedFolder) };
+      });
+    }
   };
 
   const rawTree = useMemo(() => {
     if (mode === "group") {
-      return groupTree;
+      return attachCustomFoldersToTree(groupTree, groupCustomFolders);
     }
 
     if (mode === "favorite") {
@@ -1869,7 +1878,7 @@ function Sidebar({
     }
 
     return attachCustomFoldersToTree(tree, customFolders);
-  }, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter, customFolders, groupTree]);
+  }, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter, customFolders, groupTree, groupCustomFolders]);
 
   const shownTree = useMemo(() => {
     if (searchMode || mode === "favorite") return rawTree;

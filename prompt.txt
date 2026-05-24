@@ -1,232 +1,143 @@
-你是一名专业的web开发程序员，这是我的web系统项目。刚刚我给系统母版的侧边栏做了一些修改，添加了一个分组功能。但是这个分组功能特别粗糙，和行政区以及收藏栏格格不入，具体表现如下：
+很好，你成功实现了分组和右侧内容区的联动。接下来还有一件事，我发现分组栏里面有一个小功能没有实现完善，那就是在乡级行政区之下新建自定义文件夹。当我在分组里自定义文件夹，保存之后在分组里不会显示。相反，当我切换到收藏里面，发现文件夹竟然被保存在收藏里面了。我需要你定位到这个现象产生的原因，然后给我一个具体修改方案，让分组和收藏各自保存自己新建的自定义文件夹。 
 
-1. 新建分组，在选择摄像机的时候，必须要把目录展开到最下面一级，才能勾选行政区实现摄像机的全选。如果我不展开到摄像机，就无法把行政区添加到分组里，这个功能不够友好。我建议优化一下这个功能，可以直接勾选行政区，添加到分组，不要求用户必须一级一级展开到摄像机；
+这个现象产生的根本原因在于，自定义文件夹的生命周期函数（新建、删除、拖拽）都硬编码绑定到了全局的 customFolders 状态中，且母版在渲染“分组”树（groupTree）时，压根没有调用 attachCustomFoldersToTree 去挂载这些文件夹。由于 customFolders 只被挂载到了“行政区”和“收藏”树上，导致在分组里创建的文件夹跑到了收藏里。
 
-2. 在目前的分组栏里面，分组文件夹下面直接存放的是摄像机，这样很乱。我建议用户勾选摄像机之后，至少也要把县级和乡级行政区添加到分组文件夹里作为子文件夹，把摄像机分隔开。如果用户勾选的摄像机涉及到多个行政区，也都把行政区对应挂载在分组文件夹下面。
+请在 frontend/src/components/layout/MasterLayout.jsx 中进行如下三步修改，即可让分组和收藏各自独立维护自定义文件夹：
 
 
 
-请你阅读一下相关代码，给出可靠的修改方案。
-
-针对你的两个问题，以下是高度凝练的优化方案与核心代码替换。
-
-优化一：允许不展开直接勾选行政区全选摄像机
-核心思路：在 CreateGroupModal 中增加一个 cameraMap 缓存和加载状态。当用户点击行政区勾选框时，直接调用 getNavTreeCameras 接口获取该区域下所有摄像机，并更新到缓存与选中列表中。
-
-请在 frontend/src/components/layout/MasterLayout.jsx 中，对 CreateGroupModal 组件做如下替换：
-
-1. 补充状态与缓存
+1. 声明分组专属的存储 Key 和状态
+在 MasterLayout.jsx 的文件顶部常量区以及 Sidebar 组件内部，追加分组专属的状态及持久化监听：
 
 JavaScript
-// 找到这几行状态：
-  const [loadingNodeId, setLoadingNodeId] = useState("");
-  const loadedNodesRef = useRef(new Set());
-// 【新增】下面这两行：
-  const [fetchingRegionId, setFetchingRegionId] = useState("");
-  const cameraMap = useRef(new Map());
-2. 替换展开节点的缓存逻辑
+// 1. 在文件顶部 FAVORITES_STORAGE_KEY 附近追加：
+const GROUP_CUSTOM_FOLDERS_STORAGE_KEY = "viot-group-custom-folders-v1";
 
-JavaScript
-// 找到 toggleExpand 中的这段代码并替换：
-        if (node.level === "town") {
-          const cameras = await getNavTreeCameras(node.region_code);
-          // 【新增】将加载到的摄像机存入缓存
-          cameras.forEach(c => cameraMap.current.set(c.id || c.camera_id, c));
-          children = cameras;
-        } else {
-3. 彻底替换 collectCameraIds、getCameraCheckState 和 toggleRegionSelect
-将原有的这三个函数删除，替换为以下优化后的版本：
-
-JavaScript
-  const getCameraCheckState = (node) => {
-    if (node.node_type === "camera") {
-      const isSelected = selectedCameraIds.includes(node.id);
-      return { checked: isSelected, indeterminate: false, count: isSelected ? 1 : 0 };
-    }
-
-    const total = node.total || 0;
-    if (total === 0) return { checked: false, indeterminate: false, count: 0 };
-
-    // 从已选列表中匹配属于该行政区的摄像机数量
-    let selectedCount = 0;
-    for (const id of selectedCameraIds) {
-      const cam = cameraMap.current.get(id);
-      if (cam) {
-        const code = node.region_code;
-        if (
-          cam.town_code === code ||
-          cam.county_code === code ||
-          cam.city_code === code ||
-          cam.province_code === code ||
-          cam.region_code === code
-        ) {
-          selectedCount++;
-        }
-      }
-    }
-
-    return {
-      checked: selectedCount > 0 && selectedCount >= total,
-      indeterminate: selectedCount > 0 && selectedCount < total,
-      count: selectedCount,
-    };
-  };
-
-  const toggleRegionSelect = async (node) => {
-    if (node.node_type === "camera") {
-      toggleCamera(node.id);
-      return;
-    }
-
-    if (node.total === 0) return;
-
-    setFetchingRegionId(node.region_code);
-    try {
-      // 动态获取该行政区下所有的摄像机
-      const cameras = await getNavTreeCameras(node.region_code, { limit: 5000 });
-      const cameraIds = [];
-      cameras.forEach((c) => {
-        const id = c.id || c.camera_id;
-        cameraMap.current.set(id, c);
-        cameraIds.push(id);
-      });
-
-      setSelectedCameraIds((prev) => {
-        const prevSet = new Set(prev);
-        const allSelected = cameraIds.every((id) => prevSet.has(id));
-
-        if (allSelected) {
-          cameraIds.forEach((id) => prevSet.delete(id)); // 取消全选
-        } else {
-          cameraIds.forEach((id) => prevSet.add(id)); // 勾选全选
-        }
-        return [...prevSet];
-      });
-    } catch (err) {
-      console.error("加载行政区摄像机失败:", err);
-    } finally {
-      setFetchingRegionId("");
-    }
-  };
-4. 给勾选框增加 Loading 动画
-
-JavaScript
-// 找到 renderRegionNode 中的 Checkbox 按钮并替换为：
-          <button
-            onClick={() => toggleRegionSelect(node)}
-            className="shrink-0 p-[2px]"
-            disabled={fetchingRegionId === node.region_code}
-          >
-            {fetchingRegionId === node.region_code ? (
-              <Loader2 size="var(--icon-tree-action)" className="animate-spin text-[var(--color-icon-muted)]" />
-            ) : regionState.checked ? (
-              <Check size="var(--icon-tree-action)" className="text-[var(--color-accent)]" />
-            ) : regionState.indeterminate ? (
-              <span className="flex h-[14px] w-[14px] items-center justify-center rounded border border-[var(--color-accent)] bg-[var(--color-accent)]">
-                <span className="h-[6px] w-[6px] bg-white" />
-              </span>
-            ) : (
-              <span className="inline-block h-[14px] w-[14px] rounded border border-[var(--color-panel-border)]" />
-            )}
-          </button>
-优化二：分组树按区县、乡镇自动组织子文件夹
-核心思路：在侧边栏渲染分组数据时，拦截平铺的摄像机列表，动态提取它们的 county_code 和 town_code，将其包装为虚拟的行政区节点放入树中。
-
-请在 frontend/src/components/layout/MasterLayout.jsx 中，将顶部的 buildGroupNode 函数彻底替换为以下代码：
-
-JavaScript
-function buildGroupNode(group) {
-  const subGroups = (group.children || []).map(buildGroupNode);
-  const rawCameras = (group.cameras || []).map(normalizeCameraForCustomFolder);
-
-  const onlineCameras = rawCameras.filter((c) => c.status !== "offline").length;
-  const onlineSub = subGroups.reduce((acc, g) => acc + (g.online || 0), 0);
-
-  // 将摄像机按 区县 -> 乡镇 进行聚合
-  const countyMap = new Map();
-
-  rawCameras.forEach(cam => {
-    const countyCode = cam.county_code || cam.countyCode || 'unknown_county';
-    const countyName = cam.county_name || cam.countyName || '未知区县';
-    const townCode = cam.town_code || cam.townCode || 'unknown_town';
-    const townName = cam.town_name || cam.townName || '未知街道';
-
-    if (!countyMap.has(countyCode)) {
-      countyMap.set(countyCode, {
-        id: `virtual-county-${group.id}-${countyCode}`,
-        nodeType: "region",
-        level: "county",
-        name: countyName,
-        childrenMap: new Map(),
-        cameras: [],
-        online: 0,
-        total: 0
-      });
-    }
-
-    const countyNode = countyMap.get(countyCode);
-    countyNode.total += 1;
-    if (cam.status !== 'offline') countyNode.online += 1;
-
-    if (!countyNode.childrenMap.has(townCode)) {
-      countyNode.childrenMap.set(townCode, {
-        id: `virtual-town-${group.id}-${townCode}`,
-        nodeType: "region",
-        level: "town",
-        name: townName,
-        cameras: [],
-        online: 0,
-        total: 0
-      });
-    }
-
-    const townNode = countyNode.childrenMap.get(townCode);
-    townNode.total += 1;
-    if (cam.status !== 'offline') townNode.online += 1;
-
-    townNode.cameras.push(cam); // 挂载摄像机到乡镇级
-  });
-
-  // 转化为兼容 TreeNode 渲染的虚拟节点结构
-  const virtualRegionNodes = Array.from(countyMap.values()).map(county => {
-    const townNodes = Array.from(county.childrenMap.values()).map(town => {
-      return {
-        id: town.id,
-        nodeType: "region",
-        level: "town",
-        name: town.name,
-        online: town.online,
-        total: town.total,
-        isLeaf: false,
-        loaded: true,
-        children: town.cameras
-      };
-    });
-
-    return {
-      id: county.id,
-      nodeType: "region",
-      level: "county",
-      name: county.name,
-      online: county.online,
-      total: county.total,
-      isLeaf: false,
-      loaded: true,
-      children: townNodes
-    };
-  });
-
-  return {
-    id: `group-${group.id}`,
-    rawId: group.id,
-    nodeType: "group",
-    name: repairText(group.name || "未命名分组"),
-    level: "group",
-    children: [...subGroups, ...virtualRegionNodes],
-    loaded: true,
-    isLeaf: subGroups.length === 0 && virtualRegionNodes.length === 0,
-    online: onlineCameras + onlineSub,
-    total: group.camera_count ?? (rawCameras.length + subGroups.reduce((acc, g) => acc + (g.total || 0), 0)),
-    raw: group,
-  };
+function readGroupCustomFolders() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY) || "{}");
+    return Object.fromEntries(Object.entries(stored).map(([key, value]) => [key, repairStoredNode(value)]));
+  } catch { return {}; }
 }
+
+
+
+// 2. 在 Sidebar 组件内部，初始化状态区域追加：
+const [groupCustomFolders, setGroupCustomFolders] = useState(readGroupCustomFolders);
+
+useEffect(() => {
+  try {
+    localStorage.setItem(GROUP_CUSTOM_FOLDERS_STORAGE_KEY, JSON.stringify(groupCustomFolders));
+  } catch (error) { console.error("Failed to save group custom folders:", error); }
+}, [groupCustomFolders]);
+2. 让行为函数根据当前模式（mode）进行状态路由
+定位到 Sidebar 组件内的 handleCreateCustomFolder、handleDropCameraToCustomFolder、handleDeleteCustomFolder 和 handleRemoveCameraFromCustomFolder 四个业务函数，利用 mode === "group" 区分操作目标：
+
+JavaScript
+// 修改新建逻辑
+const handleCreateCustomFolder = (townNode) => {
+  if (townNode.level !== "town") return;
+  const name = window.prompt("请输入自定义文件夹名称", `${townNode.name}自定义分组`);
+  const trimmedName = name?.trim();
+  if (!trimmedName) return;
+
+  const id = `custom-folder-${townNode.regionCode}-${Date.now()}`;
+  const newNode = makeCustomFolderNode({
+    id, name: trimmedName, regionCode: townNode.regionCode, regionName: townNode.name, parentId: townNode.id, children: [],
+  });
+
+  if (mode === "group") {
+    setGroupCustomFolders(prev => ({ ...prev, [id]: newNode }));
+  } else {
+    setCustomFolders(prev => ({ ...prev, [id]: newNode }));
+  }
+  setNodeExpanded(townNode.id, true);
+};
+
+// 修改拖拽落点逻辑
+const handleDropCameraToCustomFolder = (folderNode, cameraNode) => {
+  const camera = normalizeCameraForCustomFolder(cameraNode);
+  if (!camera.cameraId) return;
+
+  let updatedFolder = null;
+  const updateCache = (prev) => {
+    const folder = prev[folderNode.id];
+    if (!folder) return prev;
+    const children = Array.isArray(folder.children) ? folder.children : [];
+    if (children.some((item) => normalizeCameraForCustomFolder(item).cameraId === camera.cameraId)) return prev;
+    updatedFolder = makeCustomFolderNode({ ...folder, children: [...children, camera] });
+    return { ...prev, [folderNode.id]: updatedFolder };
+  };
+
+  if (mode === "group") {
+    setGroupCustomFolders(updateCache);
+  } else {
+    setCustomFolders(updateCache);
+    setFavoriteNodes((prev) => {
+      if (!updatedFolder || !prev[folderNode.id]) return prev;
+      return { ...prev, [folderNode.id]: toFavoriteNode(updatedFolder) };
+    });
+  }
+  setNodeExpanded(folderNode.id, true);
+};
+
+// 修改删除逻辑
+const handleDeleteCustomFolder = (folderNode) => {
+  if (folderNode.nodeType !== "custom_folder") return;
+  if (!window.confirm(`确定删除自定义文件夹“${folderNode.name}”吗？`)) return;
+
+  if (mode === "group") {
+    setGroupCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+  } else {
+    setCustomFolders(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+    setFavoriteNodes(prev => { const next = { ...prev }; delete next[folderNode.id]; return next; });
+  }
+  setNodeExpanded(folderNode.id, false);
+};
+
+// 修改移出摄像机逻辑
+const handleRemoveCameraFromCustomFolder = (folderId, cameraNode) => {
+  const camera = normalizeCameraForCustomFolder(cameraNode);
+  if (!camera.cameraId) return;
+
+  let updatedFolder = null;
+  const removeCache = (prev) => {
+    const folder = prev[folderId];
+    if (!folder) return prev;
+    const children = (folder.children || []).map(normalizeCameraForCustomFolder).filter((item) => item.cameraId !== camera.cameraId);
+    updatedFolder = makeCustomFolderNode({ ...folder, children });
+    return { ...prev, [folderId]: updatedFolder };
+  };
+
+  if (mode === "group") {
+    setGroupCustomFolders(removeCache);
+  } else {
+    setCustomFolders(removeCache);
+    setFavoriteNodes((prev) => {
+      if (!updatedFolder || !prev[folderId]) return prev;
+      return { ...prev, [folderId]: toFavoriteNode(updatedFolder) };
+    });
+  }
+};
+
+
+3. 将独立的分组文件夹挂载到分组树上
+定位到组件内部的 rawTree 变量计算块（useMemo），在 mode === "group" 的分支中调用挂载函数，并补全依赖项：
+
+JavaScript
+// 修改 rawTree 的 useMemo 逻辑
+const rawTree = useMemo(() => {
+  if (mode === "group") {
+    // 【修改】将分组专属的文件夹树附加到 groupTree 上
+    return attachCustomFoldersToTree(groupTree, groupCustomFolders);
+  }
+
+  if (mode === "favorite") {
+    const sourceNodes = favoriteDisplayNodes.length > 0 ? favoriteDisplayNodes : Object.values(favoriteNodes);
+    return attachCustomFoldersToTree(sourceNodes, customFolders)
+      .map((node) => filterFavoriteNodeByStatus(node, cameraStatusFilter))
+      .filter(Boolean);
+  }
+
+  return attachCustomFoldersToTree(tree, customFolders);
+}, [mode, tree, favoriteNodes, favoriteDisplayNodes, cameraStatusFilter, customFolders, groupTree, groupCustomFolders]); // 【注意】加入了 groupCustomFolders 依赖

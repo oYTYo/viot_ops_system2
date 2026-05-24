@@ -717,6 +717,15 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   const regionCode = focusTarget?.nodeType === "region" ? focusTarget.regionCode : "";
   const cameraId = focusTarget?.nodeType === "camera" ? focusTarget.cameraId : "";
 
+  // 【新增】如果是分组或自定义文件夹，提取它们所包含的摄像机 ID 集合
+  const targetCameraIds = useMemo(() => {
+    if (focusTarget?.nodeType === "custom_folder" || focusTarget?.nodeType === "group") {
+      const sourceCameras = focusTarget.nodeType === "group" ? (focusTarget.flatCameras || []) : (focusTarget.children || []);
+      return new Set(sourceCameras.map(c => c.cameraId || c.camera_id || c.id));
+    }
+    return null;
+  }, [focusTarget]);
+
   useEffect(() => {
     setLoading(true);
     Promise.all([
@@ -749,11 +758,17 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   }, [algorithm]);
 
   const allAlarms = useMemo(() => {
-    const scopedCameras = cameraId ? cameras.filter((camera) => camera.id === cameraId) : cameras;
+    // 【修复】将原本简单的 filter 逻辑更新为支持 targetCameraIds 校验
+    const scopedCameras = cameras.filter(camera => {
+      if (cameraId) return camera.id === cameraId;
+      if (targetCameraIds) return targetCameraIds.has(camera.id);
+      return true;
+    });
+    
     const scopedIds = new Set(scopedCameras.map((camera) => camera.id));
     const scopedStreams = streams.filter((stream) => scopedIds.has(stream.camera_id));
     return buildAlarms(scopedCameras, scopedStreams, handledMap, confirmStrategy, algorithm);
-  }, [cameras, streams, cameraId, handledMap, confirmStrategy, algorithm]);
+  }, [cameras, streams, cameraId, targetCameraIds, handledMap, confirmStrategy, algorithm]); // 【注意】依赖项别忘了加上 targetCameraIds
 
   const anomalyTypeOptions = useMemo(
     () => Array.from(new Set(allAlarms.map((alarm) => alarm.type))).filter(Boolean),
@@ -775,7 +790,13 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     setSelectedAlarm((current) => current && alarms.some((alarm) => alarm.id === current.id) ? current : alarms[0] || null);
   }, [alarms]);
 
-  const scopeText = focusTarget ? (focusTarget.nodeType === "camera" ? `当前摄像机：${focusTarget.name}` : `当前行政区：${focusTarget.name}`) : "当前范围：全部区域";
+  const scopeText = focusTarget 
+    ? (focusTarget.nodeType === "camera" 
+      ? `当前摄像机：${focusTarget.name}` 
+      : (focusTarget.nodeType === "custom_folder" || focusTarget.nodeType === "group")
+        ? `当前分组：${focusTarget.name}` // 【新增】如果是分组则显示当前分组
+        : `当前行政区：${focusTarget.name}`) 
+    : "当前范围：全部区域";
 
   function toggleHandled(alarm) {
     setHandledMap((current) => ({
@@ -883,9 +904,9 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                 <table className="w-full table-fixed border-separate border-spacing-0 text-left text-ui-medium">
                   <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
                     <tr>
-                      <th className="w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">告警时间</th>
-                      <th className="w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">告警摄像机</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">异常类型</th>
+                      <th className="w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
+                      <th className="w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件类型</th>
                       <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">当前状态</th>
                       <th className="w-[5rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
                     </tr>
