@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown, Filter } from "lucide-react";
 import { getDeviceCameras, getDeviceStreams } from "../services/deviceApi";
 import { getCameraPreview } from "../services/videoApi";
 
@@ -142,6 +142,66 @@ function AlarmPriorityDropdown({ priority, onChange }) {
                 </button>
               );
             })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ====== 新增：表头筛选弹出组件 ======
+function TableColumnFilter({ title, options, selectedKeys, onChange, singleMode = false }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleToggle = (key) => {
+    if (singleMode) {
+      onChange([key]);
+      setIsOpen(false);
+    } else {
+      if (selectedKeys.includes(key)) {
+        onChange(selectedKeys.filter((k) => k !== key));
+      } else {
+        onChange([...selectedKeys, key]);
+      }
+    }
+  };
+
+  const isFiltered = singleMode ? (selectedKeys[0] !== "all" && selectedKeys.length > 0) : selectedKeys.length > 0;
+
+  return (
+    <div className="relative inline-flex items-center gap-[var(--layout-tree-gap)] cursor-pointer transition-colors hover:text-[var(--color-text-main)]" onClick={() => setIsOpen(!isOpen)}>
+      <span>{title}</span>
+      <Filter size="14" className={isFiltered ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"} />
+      
+      {isOpen && (
+        <>
+          {/* 透明遮罩，点击外部关闭 */}
+          <div className="fixed inset-0 z-40 cursor-default" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} />
+          {/* 下拉菜单面板 */}
+          <div className="absolute top-full left-0 mt-1 z-50 flex min-w-[8rem] flex-col overflow-hidden rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)] text-[var(--color-text-main)] font-normal">
+            <div className="max-h-[10rem] overflow-y-auto viot-hover-scroll">
+              {options.map((opt) => {
+                const isSelected = selectedKeys.includes(opt.key);
+                return (
+                  <label key={opt.key} className="flex items-center gap-[var(--layout-search-gap)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] hover:bg-[var(--color-hover-bg)] cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type={singleMode ? "radio" : "checkbox"} 
+                      checked={isSelected}
+                      onChange={() => handleToggle(opt.key)}
+                      className="accent-[var(--color-accent)]"
+                    />
+                    <span className="text-ui-small">{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {/* 多选模式下提供底部的确定和重置按钮 */}
+            {!singleMode && (
+              <div className="flex justify-between border-t border-[var(--color-panel-border)] p-[var(--layout-tree-action-padding)] bg-[var(--color-control-bg)]">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onChange([]); setIsOpen(false); }} className="text-ui-small text-[var(--color-text-muted)] hover:text-[var(--color-text-main)]">重置</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} className="text-ui-small text-[var(--color-accent)] font-semibold">确定</button>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -826,6 +886,12 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   const [statusFilter, setStatusFilter] = useState("all");
   const [algorithm, setAlgorithm] = useState("spatioTemporal");
   const [confirmStrategy, setConfirmStrategy] = useState("manual");
+
+  // ====== 新增：列级筛选状态 ======
+  const [timeFilter, setTimeFilter] = useState(["all"]);
+  const [typeFilters, setTypeFilters] = useState([]);
+  const [priorityFilters, setPriorityFilters] = useState([]);
+  const [statusColumnFilters, setStatusColumnFilters] = useState([]);
   const [thresholds, setThresholds] = useState({
     QoE: 75,
     吞吐量: 4,
@@ -909,15 +975,49 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
   );
 
   const alarms = useMemo(() => {
+    const now = Date.now();
+    const msPerDay = 24 * 60 * 60 * 1000;
+
     return allAlarms.filter((alarm) => {
+      // 1. 全局搜索与顶部状态过滤 (保留原有逻辑)
       const haystack = `${alarm.source} ${alarm.type} ${alarm.status} ${alarm.camera?.id || ""}`.toLowerCase();
       const matchesKeyword = haystack.includes(keyword.trim().toLowerCase());
-      const matchesStatus = statusFilter === "all"
+      const matchesTopStatus = statusFilter === "all"
         || alarm.status === statusFilter
         || (statusFilter.startsWith("type:") && alarm.type === statusFilter.slice(5));
-      return matchesKeyword && matchesStatus;
+
+      // 2. 表头：时间筛选
+      let matchesTime = true;
+      if (timeFilter[0] !== "all") {
+        // 将时间字符串转化为时间戳进行比对，兼容 / 和 -
+        const alarmTime = new Date(alarm.time.replace(/-/g, '/')).getTime();
+        if (!isNaN(alarmTime)) {
+          if (timeFilter[0] === "today") {
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+            matchesTime = alarmTime >= startOfToday.getTime();
+          } else if (timeFilter[0] === "7days") {
+            matchesTime = alarmTime >= now - 7 * msPerDay;
+          } else if (timeFilter[0] === "1month") {
+            matchesTime = alarmTime >= now - 30 * msPerDay;
+          } else if (timeFilter[0] === "1year") {
+            matchesTime = alarmTime >= now - 365 * msPerDay;
+          }
+        }
+      }
+
+      // 3. 表头：事件类型多选
+      const matchesType = typeFilters.length === 0 || typeFilters.includes(alarm.type);
+      
+      // 4. 表头：优先级多选
+      const matchesPriority = priorityFilters.length === 0 || priorityFilters.includes(alarm.priority);
+      
+      // 5. 表头：状态多选
+      const matchesColumnStatus = statusColumnFilters.length === 0 || statusColumnFilters.includes(alarm.status);
+
+      return matchesKeyword && matchesTopStatus && matchesTime && matchesType && matchesPriority && matchesColumnStatus;
     });
-  }, [allAlarms, keyword, statusFilter]);
+  }, [allAlarms, keyword, statusFilter, timeFilter, typeFilters, priorityFilters, statusColumnFilters]);
 
   useEffect(() => {
     setSelectedAlarm((current) => current && alarms.some((alarm) => alarm.id === current.id) ? current : alarms[0] || null);
@@ -1068,13 +1168,55 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                 <table className="w-full min-w-max table-auto border-separate border-spacing-0 text-left text-ui-medium">
                   <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
                     <tr>
-                      {/* 恢复并强化这两个字段的宽度限制 */}
-                      <th className="w-[10rem] max-w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">时间</th>
-                      <th className="w-[18rem] max-w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件源</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">事件类型</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">优先级</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">状态</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">操作</th>
+                      <th className="w-[10rem] max-w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
+                        <TableColumnFilter 
+                          title="时间" 
+                          options={[
+                            { key: "all", label: "全部时间" },
+                            { key: "today", label: "今日" },
+                            { key: "7days", label: "近七日" },
+                            { key: "1month", label: "近一个月" },
+                            { key: "1year", label: "近一年" },
+                          ]} 
+                          selectedKeys={timeFilter} 
+                          onChange={setTimeFilter} 
+                          singleMode={true} 
+                        />
+                      </th>
+                      <th className="w-[18rem] max-w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">事件源</th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
+                        <TableColumnFilter 
+                          title="事件类型" 
+                          options={anomalyTypeOptions.map(t => ({ key: t, label: t }))} 
+                          selectedKeys={typeFilters} 
+                          onChange={setTypeFilters} 
+                        />
+                      </th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
+                        <TableColumnFilter 
+                          title="优先级" 
+                          options={[
+                            { key: "未归类", label: "未归类" },
+                            { key: "低", label: "低" },
+                            { key: "中", label: "中" },
+                            { key: "高", label: "高" },
+                          ]} 
+                          selectedKeys={priorityFilters} 
+                          onChange={setPriorityFilters} 
+                        />
+                      </th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
+                        <TableColumnFilter 
+                          title="状态" 
+                          options={[
+                            { key: "未处理", label: "未处理" },
+                            { key: "已处理", label: "已处理" },
+                          ]} 
+                          selectedKeys={statusColumnFilters} 
+                          onChange={setStatusColumnFilters} 
+                        />
+                      </th>
+                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">操作</th>
                     </tr>
                   </thead>
                   <tbody>
