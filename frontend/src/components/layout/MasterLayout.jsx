@@ -24,11 +24,13 @@ import {
   X,
   RotateCw,
   Check,
+  MoreHorizontal,
 } from "lucide-react";
 import MapView from "../../pages/MapView";
 import DeviceManage from "../../pages/DeviceManage";
 import VideoAlarmManage from "../../pages/VideoAlarmManage";
 import StatisticsView from "../../pages/StatisticsView";
+import WorkOrderManage from "../../pages/WorkOrderManage";
 
 
 import {
@@ -497,6 +499,27 @@ function attachCustomFoldersToTree(nodes, customFolders) {
 
 
 function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkMode }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const dropdownTabs = ["device_manage", "work_order"];
+  const isDropdownActive = dropdownTabs.includes(activeTab);
+
+  const handleDropdownSelect = (key) => {
+    onTabChange(key);
+    setDropdownOpen(false);
+  };
+
   return (
     <header className="h-[var(--layout-topbar-height)] shrink-0 border-b border-[var(--color-panel-border)] bg-[var(--color-topbar-bg)] px-[var(--layout-topbar-padding-x)] shadow-[var(--shadow-panel)] transition-colors">
       <div className="flex h-full items-center justify-between gap-[var(--layout-topbar-gap)]">
@@ -527,6 +550,38 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
               </button>
             );
           })}
+
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setDropdownOpen(!dropdownOpen)}
+              className={`flex min-h-[calc(var(--layout-tab-height)*1.2)] w-[15rem] items-center justify-end gap-[var(--layout-tab-inner-gap)] rounded-[var(--layout-radius-lg)] px-[var(--layout-tab-padding-x)] py-[var(--layout-tab-padding-y)] transition-colors border ${
+                isDropdownActive || dropdownOpen
+                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] border-transparent shadow-sm"
+                  : "border-[var(--color-topbar-divider)] text-[var(--color-topbar-text)] hover:bg-[var(--color-topbar-hover-bg)] hover:text-[var(--color-topbar-hover-text)] hover:border-transparent"
+              }`}
+            >
+              <ChevronDown size="var(--icon-tab)" />
+            </button>
+
+            {dropdownOpen && (
+              <div className="absolute left-0 mt-[var(--layout-tree-parent-child-gap)] w-44 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] py-1 shadow-[var(--shadow-panel)] z-50">
+                {[
+                  { key: "device_manage", label: "设备管理" },
+                  { key: "work_order", label: "工单管理" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => handleDropdownSelect(item.key)}
+                    className={`block w-full px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-left text-ui-medium transition-colors hover:bg-[var(--color-hover-bg)] ${
+                      activeTab === item.key ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text-main)]"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="flex min-w-[var(--layout-topbar-actions-width)] items-center justify-end gap-[var(--layout-topbar-action-gap)] text-[var(--color-topbar-text)]">
@@ -2084,11 +2139,19 @@ function ContentPlaceholder({
   }
 
   if (activeTab === "device") {
-    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} />;
+    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={true} />;
   }
 
   if (activeTab === "stats") {
     return <StatisticsView focusTarget={statsFocusTarget} onNavigateToDevice={onNavigateToDevice} />;
+  }
+
+  if (activeTab === "device_manage") {
+    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={false} />;
+  }
+
+  if (activeTab === "work_order") {
+    return <WorkOrderManage focusTarget={deviceFocusTarget} />;
   }
 
   const title = tabs.find((tab) => tab.key === activeTab)?.label || "内容";
@@ -2169,6 +2232,8 @@ function getPageBottomHint(activeTab) {
     alarm: "异常告警工具栏",
     device: "根因诊断工具栏",
     stats: "统计分析工具栏",
+    device_manage: "设备管理工具栏",
+    work_order: "工单管理工具栏",
   };
 
   return map[activeTab] || "页面工具栏";

@@ -1601,7 +1601,7 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
   );
 }
 
-export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail }) {
+export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail, readonlyMode = false }) {
   const [activeTab, setActiveTab] = useState(focusTarget?.deviceTab || "camera");
   const [deviceStatusFilter, setDeviceStatusFilter] = useState(focusTarget?.statusFilter || "all");
   const [keyword, setKeyword] = useState("");
@@ -2068,7 +2068,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
           </div>
 
           <div className="flex justify-end">
-            {activeTab !== "stream" && (
+            {activeTab !== "stream" && !readonlyMode && (
               <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
                 <Plus size="var(--icon-bottom)" />
                 {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
@@ -2093,9 +2093,9 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
             正在加载设备数据
           </div>
         ) : activeTab === "camera" ? (
-          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} onDiagnose={openDiagnosis} />
+          <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} onDiagnose={openDiagnosis} readonly={readonlyMode} />
         ) : activeTab === "server" ? (
-          <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} />
+          <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
         ) : (
           <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly />
         )}

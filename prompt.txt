@@ -4,219 +4,244 @@
 
 我的需求：
 
-VideoAlarmManage.jsx是我的异常告警板块。我希望在告警列表添加一个筛选功能，像Excel一样可以在表头勾选筛选范围。比如第一列是时间，那么点击这个时间，就可以弹出窗口来让我们筛选今日，近七日，近一个月，近一年；第二列是事件源，这个就不筛选了；第三列事件类型、第四列优先级和第五列状态都可以筛选，比如优先级，弹出窗口让我们从已有的优先级里面勾选出想看的条目，这些都允许多选。我的要求就是不影响现有其他功能，并且美观，我们有Tailwind CSS，你可以用好看的组件。
+现在我的web系统pages里有两个页面其实没有用到，一个是工单管理WorkOrderManage，另一个是视频浏览 VideoBrowse。现在我请你帮我完成一件事：在现有系统的顶部导航栏，四个功能板块后面（也就是统计分析后面），给我添加第五个功能板块，这个板块没有名字，它就是一个和前面四个功能宽度一致的气泡，气泡上面什么字也不写，点击可以弹出一个下拉框（用Tailwind CSS弄美观点）。下拉框里依次给出：视频浏览、设备管理和工单管理这三个功能。视频浏览和工单管理这两个页面至此恢复自己原本的功能，接入到现在的系统（可能需要一些对齐操作，但是也要保证其他功能不受影响的情况下接入这俩页面，优先调整这俩页面的代码）。除此之外，设备管理这个功能板块从哪里来呢：你新建一个设备管理的，直接复制现在的根因诊断板块，根因诊断其实就是设备管理的内容。为了做出区分，同时你删掉根因诊断板块里面“新增摄像机”、“新增服务器”这样类似的按钮，只保留设备管理里面的新增功能。
 
 
 
 修改方案：
- 
-
-仔细阅读了你的需求和 tips.md 开发者守则。为了实现类似 Excel 的表头筛选，我们需要构建一个可以复用的表头过滤组件 TableColumnFilter，并在 VideoAlarmManage 中增加相关的过滤状态，最后将它们组合进 alarms 的 useMemo 计算逻辑中。
-
-此方案完全遵循了 tips.md 的要求，使用现有的 CSS 变量（例如 var(--color-panel-bg)、var(--layout-search-gap) 等），不硬编码像素，并且原生支持多选和单选的 UI 样式。
-
-请按照以下 5 个步骤对 VideoAlarmManage.jsx 进行具体修改：
 
 
+为了实现你的需求，我们需要对现有的 MasterLayout.jsx 和 DeviceManage.jsx 进行修改。我们将引入一个下拉菜单（通过 React 的状态控制，无需额外的重组件），并将新页面与现有路由对齐。同时，我们会给 DeviceManage 添加一个“只读模式”的参数，以便在“根因诊断”中隐藏新增、编辑和删除等操作。
 
-第一步：补充图标引入
-在文件最顶部的 lucide-react 引入中，添加 Filter 图标：
-
-JavaScript
-// 修改前：
-import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown } from "lucide-react";
-// 修改后：
-import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown, Filter } from "lucide-react";
+以下是具体的修改方案：
 
 
+修改方案 1：更新 frontend/src/components/layout/MasterLayout.jsx
+在母版布局中，我们需要引入缺少的页面、在顶部导航栏增加第五个气泡（下拉菜单），并在内容区支持这几个新的 activeTab。
 
-第二步：新增复用型表头筛选组件
-在 AlarmPriorityDropdown 的下方（或任意文件级函数区域），新增一个用于表头筛选的组件 TableColumnFilter：
+
+步骤 1.1：补充组件和页面的引入
+在文件顶部的 import 区域，增加对下拉菜单所需的图标以及两个闲置页面的引入：
 
 JavaScript
-// ====== 新增：表头筛选弹出组件 ======
-function TableColumnFilter({ title, options, selectedKeys, onChange, singleMode = false }) {
-  const [isOpen, setIsOpen] = useState(false);
+// 在 lucide-react 的引入中，增加 MoreHorizontal
+import {
+  // ...原来的图标
+  MoreHorizontal
+} from "lucide-react";
 
-  const handleToggle = (key) => {
-    if (singleMode) {
-      onChange([key]);
-      setIsOpen(false);
-    } else {
-      if (selectedKeys.includes(key)) {
-        onChange(selectedKeys.filter((k) => k !== key));
-      } else {
-        onChange([...selectedKeys, key]);
+// 在原有引入 MapView, DeviceManage 等页面的下方，增加：
+import VideoBrowse from "../../pages/VideoBrowse";
+import WorkOrderManage from "../../pages/WorkOrderManage";
+
+
+步骤 1.2：修改 TopBar 组件，添加下拉菜单
+将 TopBar 改为包含内部状态（用于控制下拉框展开/收起），并在原有 tabs.map 的后面添加第五个气泡组件。修改如下：
+
+JavaScript
+// 修改 TopBar 函数定义，添加内部状态及点击外部关闭逻辑
+function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkMode }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
       }
-    }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const dropdownTabs = ["video_browse", "device_manage", "work_order"];
+  const isDropdownActive = dropdownTabs.includes(activeTab);
+
+  const handleDropdownSelect = (key) => {
+    onTabChange(key);
+    setDropdownOpen(false);
   };
 
-  const isFiltered = singleMode ? (selectedKeys[0] !== "all" && selectedKeys.length > 0) : selectedKeys.length > 0;
-
   return (
-    <div className="relative inline-flex items-center gap-[var(--layout-tree-gap)] cursor-pointer transition-colors hover:text-[var(--color-text-main)]" onClick={() => setIsOpen(!isOpen)}>
-      <span>{title}</span>
-      <Filter size="14" className={isFiltered ? "text-[var(--color-accent)]" : "text-[var(--color-icon-muted)]"} />
-      
-      {isOpen && (
-        <>
-          {/* 透明遮罩，点击外部关闭 */}
-          <div className="fixed inset-0 z-40 cursor-default" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} />
-          {/* 下拉菜单面板 */}
-          <div className="absolute top-full left-0 mt-1 z-50 flex min-w-[8rem] flex-col overflow-hidden rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)] text-[var(--color-text-main)] font-normal">
-            <div className="max-h-[16rem] overflow-y-auto">
-              {options.map((opt) => {
-                const isSelected = selectedKeys.includes(opt.key);
-                return (
-                  <label key={opt.key} className="flex items-center gap-[var(--layout-search-gap)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] hover:bg-[var(--color-hover-bg)] cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                    <input 
-                      type={singleMode ? "radio" : "checkbox"} 
-                      checked={isSelected}
-                      onChange={() => handleToggle(opt.key)}
-                      className="accent-[var(--color-accent)]"
-                    />
-                    <span className="text-ui-small">{opt.label}</span>
-                  </label>
-                );
-              })}
-            </div>
-            {/* 多选模式下提供底部的确定和重置按钮 */}
-            {!singleMode && (
-              <div className="flex justify-between border-t border-[var(--color-panel-border)] p-[var(--layout-tree-action-padding)] bg-[var(--color-control-bg)]">
-                <button type="button" onClick={(e) => { e.stopPropagation(); onChange([]); setIsOpen(false); }} className="text-ui-small text-[var(--color-text-muted)] hover:text-[var(--color-text-main)]">重置</button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); setIsOpen(false); }} className="text-ui-small text-[var(--color-accent)] font-semibold">确定</button>
+    <header className="h-[var(--layout-topbar-height)] shrink-0 border-b border-[var(--color-panel-border)] bg-[var(--color-topbar-bg)] px-[var(--layout-topbar-padding-x)] shadow-[var(--shadow-panel)] transition-colors">
+      <div className="flex h-full items-center justify-between gap-[var(--layout-topbar-gap)]">
+        {/* ... 保留左侧的 Logo 区域 ... */}
+
+        <nav className="flex flex-1 items-center justify-start gap-[var(--layout-tab-gap)]">
+          {tabs.map(({ key, label, icon: Icon }) => {
+            const isActive = activeTab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => onTabChange(key)}
+                // ...原有的 class 样式保持不变
+              >
+                <Icon size="var(--icon-tab)" />
+                {label}
+              </button>
+            );
+          })}
+
+          {/* 新增：第五个气泡（下拉菜单） */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setDropdownOpen(!dropdownOpen)}
+              className={`flex min-h-[var(--layout-tab-height)] min-w-[8rem] items-center justify-center gap-[var(--layout-tab-inner-gap)] rounded-[var(--layout-radius-lg)] px-[var(--layout-tab-padding-x)] py-[var(--layout-tab-padding-y)] transition-colors ${
+                isDropdownActive || dropdownOpen
+                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm"
+                  : "text-[var(--color-topbar-text)] hover:bg-[var(--color-topbar-hover-bg)] hover:text-[var(--color-topbar-hover-text)]"
+              }`}
+            >
+              <MoreHorizontal size="var(--icon-tab)" />
+            </button>
+
+            {dropdownOpen && (
+              <div className="absolute left-0 mt-[var(--layout-tree-parent-child-gap)] w-36 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] py-1 shadow-[var(--shadow-panel)] z-50">
+                {[
+                  { key: "video_browse", label: "视频浏览" },
+                  { key: "device_manage", label: "设备管理" },
+                  { key: "work_order", label: "工单管理" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => handleDropdownSelect(item.key)}
+                    className={`block w-full px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-left text-ui-medium transition-colors hover:bg-[var(--color-hover-bg)] ${
+                      activeTab === item.key ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text-main)]"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
-        </>
-      )}
-    </div>
+        </nav>
+
+        {/* ... 保留右侧的操作按钮区域 ... */}
+      </div>
+    </header>
   );
 }
 
 
-
-
-第三步：在主组件中增加状态变量
-在 export default function VideoAlarmManage(...) { 内部，找到现有的 useState 声明群（大概在 const [statusFilter, setStatusFilter] = useState("all"); 附近），追加以下 4 个状态：
+步骤 1.3：修改 ContentPlaceholder 的组件分发逻辑
+根据 activeTab 渲染不同的页面。注意给 device（原根因诊断）和 device_manage（新增设备管理）传入不同的 readonlyMode 参数。
 
 JavaScript
-  // ====== 新增：列级筛选状态 ======
-  const [timeFilter, setTimeFilter] = useState(["all"]);
-  const [typeFilters, setTypeFilters] = useState([]);
-  const [priorityFilters, setPriorityFilters] = useState([]);
-  const [statusColumnFilters, setStatusColumnFilters] = useState([]); 
+function ContentPlaceholder({
+  // ...参数保持不变...
+}) {
+  if (activeTab === "map") {
+    // ... 原有逻辑
+  }
+
+  if (activeTab === "alarm") {
+    // ... 原有逻辑
+  }
+
+  if (activeTab === "device") {
+    // 根因诊断板块：只读模式，不提供新增、编辑、删除等维护操作
+    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={true} />;
+  }
+
+  if (activeTab === "stats") {
+    // ... 原有逻辑
+  }
+  
+  // 新增：设备管理板块（开放全部读写权限）
+  if (activeTab === "device_manage") {
+    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={false} />;
+  }
+
+  // 新增：视频浏览
+  if (activeTab === "video_browse") {
+    return <VideoBrowse focusTarget={deviceFocusTarget} darkMode={darkMode} />;
+  }
+
+  // 新增：工单管理
+  if (activeTab === "work_order") {
+    return <WorkOrderManage focusTarget={deviceFocusTarget} />;
+  }
+
+  // ... 底部的 fallback 逻辑保持不变
+}
 
 
 
-第四步：修改告警列表的过滤逻辑
-找到现有的 const alarms = useMemo(() => { ... }, [...]) 块，将它整体替换为以下结合了多维列级筛选的新逻辑：
-
-JavaScript
-  const alarms = useMemo(() => {
-    const now = Date.now();
-    const msPerDay = 24 * 60 * 60 * 1000;
-
-    return allAlarms.filter((alarm) => {
-      // 1. 全局搜索与顶部状态过滤 (保留原有逻辑)
-      const haystack = `${alarm.source} ${alarm.type} ${alarm.status} ${alarm.camera?.id || ""}`.toLowerCase();
-      const matchesKeyword = haystack.includes(keyword.trim().toLowerCase());
-      const matchesTopStatus = statusFilter === "all"
-        || alarm.status === statusFilter
-        || (statusFilter.startsWith("type:") && alarm.type === statusFilter.slice(5));
-
-      // 2. 表头：时间筛选
-      let matchesTime = true;
-      if (timeFilter[0] !== "all") {
-        // 将时间字符串转化为时间戳进行比对，兼容 / 和 -
-        const alarmTime = new Date(alarm.time.replace(/-/g, '/')).getTime();
-        if (!isNaN(alarmTime)) {
-          if (timeFilter[0] === "today") {
-            const startOfToday = new Date();
-            startOfToday.setHours(0, 0, 0, 0);
-            matchesTime = alarmTime >= startOfToday.getTime();
-          } else if (timeFilter[0] === "7days") {
-            matchesTime = alarmTime >= now - 7 * msPerDay;
-          } else if (timeFilter[0] === "1month") {
-            matchesTime = alarmTime >= now - 30 * msPerDay;
-          } else if (timeFilter[0] === "1year") {
-            matchesTime = alarmTime >= now - 365 * msPerDay;
-          }
-        }
-      }
-
-      // 3. 表头：事件类型多选
-      const matchesType = typeFilters.length === 0 || typeFilters.includes(alarm.type);
-      
-      // 4. 表头：优先级多选
-      const matchesPriority = priorityFilters.length === 0 || priorityFilters.includes(alarm.priority);
-      
-      // 5. 表头：状态多选
-      const matchesColumnStatus = statusColumnFilters.length === 0 || statusColumnFilters.includes(alarm.status);
-
-      return matchesKeyword && matchesTopStatus && matchesTime && matchesType && matchesPriority && matchesColumnStatus;
-    });
-  }, [allAlarms, keyword, statusFilter, timeFilter, typeFilters, priorityFilters, statusColumnFilters]);
-
-
-
-第五步：将原表头（<thead>）替换为带组件筛选器的表头
-在 return (...) 的 JSX 部分，找到 <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]"> 包裹的这部分。将它修改如下。在这里，我们通过之前提取的 anomalyTypeOptions 动态生成类型筛选项：
+步骤 1.4：更新底部栏提示词
+修改 getPageBottomHint 函数支持新页面：
 
 JavaScript
-                  <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
-                    <tr>
-                      <th className="w-[10rem] max-w-[10rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
-                        <TableColumnFilter 
-                          title="时间" 
-                          options={[
-                            { key: "all", label: "全部时间" },
-                            { key: "today", label: "今日" },
-                            { key: "7days", label: "近七日" },
-                            { key: "1month", label: "近一个月" },
-                            { key: "1year", label: "近一年" },
-                          ]} 
-                          selectedKeys={timeFilter} 
-                          onChange={setTimeFilter} 
-                          singleMode={true} 
-                        />
-                      </th>
-                      <th className="w-[18rem] max-w-[18rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">事件源</th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
-                        <TableColumnFilter 
-                          title="事件类型" 
-                          options={anomalyTypeOptions.map(t => ({ key: t, label: t }))} 
-                          selectedKeys={typeFilters} 
-                          onChange={setTypeFilters} 
-                        />
-                      </th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
-                        <TableColumnFilter 
-                          title="优先级" 
-                          options={[
-                            { key: "未归类", label: "未归类" },
-                            { key: "低", label: "低" },
-                            { key: "中", label: "中" },
-                            { key: "高", label: "高" },
-                          ]} 
-                          selectedKeys={priorityFilters} 
-                          onChange={setPriorityFilters} 
-                        />
-                      </th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">
-                        <TableColumnFilter 
-                          title="状态" 
-                          options={[
-                            { key: "未处理", label: "未处理" },
-                            { key: "已处理", label: "已处理" },
-                          ]} 
-                          selectedKeys={statusColumnFilters} 
-                          onChange={setStatusColumnFilters} 
-                        />
-                      </th>
-                      <th className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] align-middle">操作</th>
-                    </tr>
-                  </thead>
+function getPageBottomHint(activeTab) {
+  const map = {
+    map: "运维大屏工具栏",
+    alarm: "异常告警工具栏",
+    device: "根因诊断工具栏",
+    stats: "统计分析工具栏",
+    video_browse: "视频浏览工具栏",
+    device_manage: "设备管理工具栏",
+    work_order: "工单管理工具栏",
+  };
+
+  return map[activeTab] || "页面工具栏";
+}
 
 
-通过这 5 步，你就在保持了组件结构和 Tailwind 样式一致性的前提下，无缝嵌入了一个 Excel 风格的表头过滤功能（并实现了事件类型的自适应选项、时间筛选以及其余项的多选联动）。
+
+修改方案 2：更新 frontend/src/pages/DeviceManage.jsx
+在 DeviceManage 页面里，我们需要接收由 MasterLayout 传过来的 readonlyMode，并在渲染“新增”按钮和 DeviceTable 内部控制其表现（DeviceTable 已经自带了通过 readonly 隐藏编辑和删除的功能）。
+
+
+步骤 2.1：修改组件接收参数并透传
+修改 DeviceManage 默认导出函数的签名：
+
+JavaScript
+// 增加 readonlyMode 参数，默认为 false
+export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail, readonlyMode = false }) {
+  // ... 之前的各类状态和 Effect 等无需修改 ...
+
+
+
+步骤 2.2：控制“新增”相关按钮的显示
+在 DeviceManage 返回的 JSX 渲染中，找到右侧头部的“新增摄像机/服务器”按钮，为其添加 !readonlyMode 条件：
+
+JavaScript
+// 搜索此段代码并作修改：
+<div className="flex justify-end">
+  {activeTab !== "stream" && !readonlyMode && (
+    <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
+      <Plus size="var(--icon-bottom)" />
+      {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
+    </button>
+  )}
+</div>
+
+
+步骤 2.3：将 readonlyMode 透传给表格组件
+使得摄像机和服务器的表格在只读状态下也能隐藏操作栏里的编辑和删除。
+在 DeviceManage 的末尾 DeviceTable 渲染部分：
+
+JavaScript
+// 将原本的：
+<DeviceTable columns={cameraColumns} rows={shownCameras} ... />
+// 和：
+<DeviceTable columns={serverColumns} rows={shownServers} ... />
+
+// 修改为（注意添加了 readonly={readonlyMode}）：
+{activeTab === "camera" ? (
+  <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} onDiagnose={openDiagnosis} readonly={readonlyMode} />
+) : activeTab === "server" ? (
+  <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
+) : (
+  <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly={true} /> // 这里的 stream 默认本就是只读，所以是 readonly={true} 或者保持原样 readonly
+)}
+
+
+调整总结
+这个方案做到了如下几点（100% 遵循了 tips.md）：
+
+未硬编码样式：气泡宽度我使用了 min-w-[8rem] 配合 px/py-[var(...)] 的全局变量，没有写死具体像素。下拉框配色使用了 var(--color-panel-bg) 等核心变量自适应浅深色。
+
+共用底层母版：并未在 VideoBrowse 等页面里重复实现侧边树，仅仅是在 Layout 的路由中心将它们挂载上了。
+
+功能完全分离：现在系统里的【根因诊断】标签点击进去就是“只读”看表格点诊断；而下拉框的【设备管理】不仅能诊断，还能实现新增/编辑/删除管理，逻辑实现了彻底复用。

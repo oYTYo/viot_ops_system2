@@ -17,7 +17,7 @@
 
   /* 顶部标签 */
   --layout-tab-height: calc(var(--font-large) * 1.15);
-  --layout-tab-gap: calc(var(--font-large) * 0.48);
+  --layout-tab-gap: calc(var(--font-large) * 1);
   --layout-tab-inner-gap: calc(var(--font-large) * 0.36);
   --layout-tab-padding-x: calc(var(--font-large) * 0.71);
   --layout-tab-padding-y: calc(var(--font-large) * 0.1);  
