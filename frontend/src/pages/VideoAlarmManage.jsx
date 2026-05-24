@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown } from "lucide-react";
 import { getDeviceCameras, getDeviceStreams } from "../services/deviceApi";
 import { getCameraPreview } from "../services/videoApi";
 
@@ -28,6 +28,62 @@ function statusClass(status) {
   if (status === "已处理") return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
   return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
 }
+
+
+function AlarmStatusDropdown({ status, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const options = ["未处理", "已处理"];
+
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className={`flex items-center gap-[var(--layout-tree-gap)] rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[2px] transition-colors hover:brightness-95 ${statusClass(status)}`}
+      >
+        <span>{status}</span>
+        <ChevronDown size="14" className="opacity-70" />
+      </button>
+
+      {isOpen && (
+        <>
+          {/* 透明遮罩，点击外部自动关闭 */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+            }}
+          />
+          {/* 下拉菜单：默认靠右对齐，向下弹出 */}
+          <div className="absolute right-[calc(100%+6px)] top-1/2 -translate-y-1/2 z-50 flex w-[8rem] flex-col overflow-hidden rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+                {options.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsOpen(false);
+                      if (opt !== status) onChange(opt);
+                    }}
+                    className={`px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-center text-ui-small font-medium transition-colors hover:bg-[var(--color-hover-bg)] ${
+                      opt === "已处理" ? "text-[var(--color-accent)]" : "text-[var(--color-error-text)]"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 
 function detectionRowClass(tier) {
   if (tier === "strong") return "bg-red-300/45";
@@ -932,16 +988,12 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
                           </div>
                         </td>
                         <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">{alarm.type}</td>
-                        <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
-                          <select
-                            value={alarm.status}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => updateAlarmStatus(alarm, event.target.value)}
-                            className={`cursor-pointer appearance-none outline-none rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] py-[1px] text-center font-medium ${statusClass(alarm.status)}`}
-                          >
-                            <option value="未处理">未处理</option>
-                            <option value="已处理">已处理</option>
-                          </select>
+                        
+                        <td className="border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                          <AlarmStatusDropdown 
+                            status={alarm.status} 
+                            onChange={(newStatus) => updateAlarmStatus(alarm, newStatus)} 
+                          />
                         </td>
                         <td className="truncate border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                           <button 
