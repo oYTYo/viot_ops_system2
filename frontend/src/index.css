@@ -69,6 +69,21 @@
   --layout-content-gap: calc(var(--font-medium) * 0.53);
   --layout-footer-height: calc(var(--font-medium) * 1.75);
 
+  --layout-metrics-panel-gap: var(--layout-content-gap);
+  --layout-metrics-panel-padding-x: var(--layout-content-padding);
+  --layout-metrics-panel-padding-y: var(--layout-content-padding);
+  --layout-metrics-card-padding-x: var(--layout-content-padding);
+  --layout-metrics-card-padding-y: var(--layout-content-padding);
+  --layout-metrics-card-content-gap: var(--layout-content-gap);
+  --layout-metrics-title-gap: var(--layout-search-padding-y);
+  --layout-metrics-section-flex: 0 0 auto;
+  --layout-metrics-health-gauge-size: calc(var(--font-large) * 4.45);
+  --layout-metrics-health-value-size: var(--font-large);
+  --layout-metrics-health-legend-gap: var(--layout-search-gap);
+  --layout-metrics-safe-days-size: var(--font-medium);
+  --layout-metrics-chart-value-size: var(--font-small);
+  --layout-metrics-chart-value-offset: calc(var(--font-small) * 0.41);
+
 /* 状态提示 */
 --layout-status-margin-top: calc(var(--font-medium) * 0.25);
 --layout-status-icon-margin-top: calc(var(--font-small) * 0.1);
@@ -135,6 +150,20 @@
   --layout-tree-row-ratio: 1.55;
   --layout-tree-gap-ratio: 0.5;
   --layout-device-table-padding-y: calc(var(--font-medium) * 0.12);
+  --layout-metrics-panel-gap: calc(var(--font-medium) * 3.0);
+  --layout-metrics-panel-padding-x: calc(var(--font-medium) * 0.5);
+  --layout-metrics-panel-padding-y: calc(var(--font-medium) * 0.42);
+  --layout-metrics-card-padding-x: calc(var(--font-medium) * 0.48);
+  --layout-metrics-card-padding-y: calc(var(--font-medium) * 0.38);
+  --layout-metrics-card-content-gap: calc(var(--font-medium) * 0.35);
+  --layout-metrics-title-gap: calc(var(--font-medium) * 0.08);
+  --layout-metrics-section-flex: 1 1 0;
+  --layout-metrics-health-gauge-size: calc(var(--font-large) * 8);
+  --layout-metrics-health-value-size: calc(var(--font-large) * 1.5);
+  --layout-metrics-health-legend-gap: calc(var(--font-medium) * 2);
+  --layout-metrics-safe-days-size: calc(var(--font-medium) * 1.18);
+  --layout-metrics-chart-value-size: calc(var(--font-small) * 0.82);
+  --layout-metrics-chart-value-offset: calc(var(--font-small) * 0.78);
 }
 
 .text-app-title {
