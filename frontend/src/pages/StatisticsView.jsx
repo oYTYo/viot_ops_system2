@@ -105,7 +105,7 @@ function LatexFormula({ source }) {
       <span className="shrink-0 whitespace-nowrap">全局健康度 = 100 -</span>
       <span className="inline-flex shrink-0 flex-col items-center align-middle leading-none" title={source}>
         <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)] [.font-scale-small_&]:px-[var(--layout-reset-padding-x)]">
-          Σ 每条链路权重 × 异常分数
+          Σ (每条链路权重 × 异常分数)
         </span>
         <span className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-tree-gap)] [.font-scale-small_&]:px-[var(--layout-reset-padding-x)]">
           Σ 每条链路权重

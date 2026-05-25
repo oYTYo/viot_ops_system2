@@ -2406,7 +2406,7 @@ export default function VioTMasterLayout() {
       return;
     }
 
-    if (activeTab === "device") {
+    if (activeTab === "device" || activeTab === "device_manage" || activeTab === "work_order") {
       setDeviceFocusTarget({
         ...node,
         version: Date.now(),

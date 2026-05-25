@@ -265,7 +265,7 @@ function LatexFormulaMini() {
     <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-[var(--layout-search-gap)] gap-y-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)]" title="全局健康度 = 100 - 加权平均异常分数">
       <span className="shrink-0 whitespace-nowrap">全局健康度 = 100 -</span>
       <span className="inline-flex shrink-0 flex-col items-center align-middle leading-none">
-        <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)]">Σ 每条链路权重 × 异常分数</span>
+        <span className="border-b border-[var(--color-text-muted)] px-[var(--layout-tree-action-padding)] pb-[var(--layout-tree-gap)]">Σ (每条链路权重 × 异常分数)</span>
         <span className="px-[var(--layout-tree-action-padding)] pt-[var(--layout-tree-gap)]">Σ 每条链路权重</span>
       </span>
     </div>
@@ -845,8 +845,10 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
         {previewCamera && <MapCameraPreview camera={previewCamera} onClose={() => setPreviewCamera(null)} onDetail={onOpenCameraDetail} onDiagnose={onOpenCameraDiagnosis} />}
 
         <div className="pointer-events-none absolute left-[var(--layout-content-padding)] top-[var(--layout-content-padding)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
-          <MapPinned size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
-          <span>双击左侧行政区定位；县级及以下显示摄像机</span>
+          <RadioTower size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
+          <span>区域显示在线/总数</span>
+          <Camera size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
+          <span>县级显示摄像机</span>
         </div>
 
         {loading && (
@@ -872,12 +874,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
           </div>
         )}
 
-        <div className="absolute bottom-[var(--layout-content-padding)] right-[var(--layout-content-padding)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-muted)] shadow-[var(--shadow-panel)]">
-          <RadioTower size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
-          <span>区域显示在线/总数</span>
-          <Camera size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
-          <span>县级显示摄像机</span>
-        </div>
+        
       </section>
       <OperationMetricsPanel focusTarget={focusTarget} onNavigateToDevice={onNavigateToDevice} />
     </main>

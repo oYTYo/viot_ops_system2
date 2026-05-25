@@ -2071,7 +2071,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
             {activeTab !== "stream" && !readonlyMode && (
               <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
                 <Plus size="var(--icon-bottom)" />
-                {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
+                {activeTab === "camera" ? "流链路绑定" : "新增服务器"}
               </button>
             )}
           </div>
