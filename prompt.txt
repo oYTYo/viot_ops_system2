@@ -4,244 +4,143 @@
 
 我的需求：
 
-现在我的web系统pages里有两个页面其实没有用到，一个是工单管理WorkOrderManage，另一个是视频浏览 VideoBrowse。现在我请你帮我完成一件事：在现有系统的顶部导航栏，四个功能板块后面（也就是统计分析后面），给我添加第五个功能板块，这个板块没有名字，它就是一个和前面四个功能宽度一致的气泡，气泡上面什么字也不写，点击可以弹出一个下拉框（用Tailwind CSS弄美观点）。下拉框里依次给出：视频浏览、设备管理和工单管理这三个功能。视频浏览和工单管理这两个页面至此恢复自己原本的功能，接入到现在的系统（可能需要一些对齐操作，但是也要保证其他功能不受影响的情况下接入这俩页面，优先调整这俩页面的代码）。除此之外，设备管理这个功能板块从哪里来呢：你新建一个设备管理的，直接复制现在的根因诊断板块，根因诊断其实就是设备管理的内容。为了做出区分，同时你删掉根因诊断板块里面“新增摄像机”、“新增服务器”这样类似的按钮，只保留设备管理里面的新增功能。
+这是我的web系统，目前我发现了一个可以优化的地方。每次我双击左侧行政区，试图对根因诊断或者设备管理里面那个设备列表进行筛选的时候，它的加载速度都异常的慢，你可以帮我分析一下原因是什么吗？并且给出一些加速的修改方案。我的要求就是不要影响到现有功能，只是做加速。如果做不到，你也可以和我说原因和权衡点。
 
 
 
 修改方案：
 
 
-为了实现你的需求，我们需要对现有的 MasterLayout.jsx 和 DeviceManage.jsx 进行修改。我们将引入一个下拉菜单（通过 React 的状态控制，无需额外的重组件），并将新页面与现有路由对齐。同时，我们会给 DeviceManage 添加一个“只读模式”的参数，以便在“根因诊断”中隐藏新增、编辑和删除等操作。
+这是一个非常经典的性能瓶颈问题，结合你提供的代码，我找到了导致双击左侧行政区树加载缓慢的两个核心原因：一个是前端的不必要全量请求，另一个是后端低效的暴力递归查询。
 
-以下是具体的修改方案：
+原因分析
+前端原因（过度请求）：
+在 DeviceManage.jsx 中，useEffect 依赖了 [regionCode, cameraId]。当双击左侧树切换区域时，会触发 loadData 函数。而 loadData 中用了一个 Promise.all，不仅请求了当前区域的摄像机，还无差别地重新拉取了全网所有的服务器 (Server) 和流链路 (Stream)。由于服务器和流链路的接口并没有过滤参数，每次切换区域都会让前端等待全量数据返回，严重浪费了带宽和渲染性能。
 
-
-修改方案 1：更新 frontend/src/components/layout/MasterLayout.jsx
-在母版布局中，我们需要引入缺少的页面、在顶部导航栏增加第五个气泡（下拉菜单），并在内容区支持这几个新的 activeTab。
-
-
-步骤 1.1：补充组件和页面的引入
-在文件顶部的 import 区域，增加对下拉菜单所需的图标以及两个闲置页面的引入：
-
-JavaScript
-// 在 lucide-react 的引入中，增加 MoreHorizontal
-import {
-  // ...原来的图标
-  MoreHorizontal
-} from "lucide-react";
-
-// 在原有引入 MapView, DeviceManage 等页面的下方，增加：
-import VideoBrowse from "../../pages/VideoBrowse";
-import WorkOrderManage from "../../pages/WorkOrderManage";
+后端原因（数据库灾难操作）：
+在 main.py 的 /cameras 和 /statistics/overview 接口中，为了获取某个省或市下面的所有摄像机，你调用了 _collect_region_descendant_codes 函数。这个函数会执行 db.query(models.AdministrativeRegion).all()，把数据库里所有的行政区全部加载到内存中去递归寻找子节点，最后再拼装一个巨型的 IN 语句去查摄像机。
+实际上，你的 Camera 模型已经冗余存储了 province_code、city_code 等字段，直接等值查询就能达到 O(1) 的效果，完全没必要走昂贵的整表查询。
 
 
-步骤 1.2：修改 TopBar 组件，添加下拉菜单
-将 TopBar 改为包含内部状态（用于控制下拉框展开/收起），并在原有 tabs.map 的后面添加第五个气泡组件。修改如下：
+
+具体修改方案
+这两个优化完全不会影响现有功能，只做加速。
+
+
+1. 前端加速：分离基础数据与联动数据请求
+文件： frontend/src/pages/DeviceManage.jsx
+修改方案： 将 servers 和 streams 的加载与 cameras 的加载剥离。前者只在页面初次挂载或手动刷新时请求，后者跟随 regionCode 变化请求。
+
+找到 DeviceManage 组件中的 loadData 及下方的 useEffect，替换为以下代码：
 
 JavaScript
-// 修改 TopBar 函数定义，添加内部状态及点击外部关闭逻辑
-function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkMode }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
+  // 拆分1：只加载不需要跟随行政区变动的数据（服务器、流链路）
+  const loadCommonData = async () => {
+    try {
+      const [serverRows, streamRows] = await Promise.all([
+        getDeviceServers(),
+        getDeviceStreams(),
+      ]);
+      setServers(serverRows);
+      setStreams(streamRows);
+    } catch (err) {
+      console.error("Failed to load common device data:", err);
+    }
+  };
 
+  // 拆分2：跟随左侧树联动的摄像机数据
+  const loadCameraData = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const cameraRows = await getDeviceCameras(regionCode ? { region_code: regionCode } : {});
+      setCameras(cameraRows);
+    } catch (err) {
+      console.error("Failed to load camera data:", err);
+      setError(err.message || "摄像机数据加载失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 手动刷新按钮逻辑
+  const handleRefresh = async () => {
+    loadCommonData();
+    await loadCameraData();
+  };
+
+  // 仅在组件初次挂载时加载一次服务器和流链路
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    loadCommonData();
   }, []);
 
-  const dropdownTabs = ["video_browse", "device_manage", "work_order"];
-  const isDropdownActive = dropdownTabs.includes(activeTab);
+  // 当左侧树切换 regionCode 时，仅重新拉取该区域的摄像机
+  useEffect(() => {
+    loadCameraData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionCode, cameraId]);
 
-  const handleDropdownSelect = (key) => {
-    onTabChange(key);
-    setDropdownOpen(false);
-  };
-
-  return (
-    <header className="h-[var(--layout-topbar-height)] shrink-0 border-b border-[var(--color-panel-border)] bg-[var(--color-topbar-bg)] px-[var(--layout-topbar-padding-x)] shadow-[var(--shadow-panel)] transition-colors">
-      <div className="flex h-full items-center justify-between gap-[var(--layout-topbar-gap)]">
-        {/* ... 保留左侧的 Logo 区域 ... */}
-
-        <nav className="flex flex-1 items-center justify-start gap-[var(--layout-tab-gap)]">
-          {tabs.map(({ key, label, icon: Icon }) => {
-            const isActive = activeTab === key;
-            return (
-              <button
-                key={key}
-                onClick={() => onTabChange(key)}
-                // ...原有的 class 样式保持不变
-              >
-                <Icon size="var(--icon-tab)" />
-                {label}
-              </button>
-            );
-          })}
-
-          {/* 新增：第五个气泡（下拉菜单） */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className={`flex min-h-[var(--layout-tab-height)] min-w-[8rem] items-center justify-center gap-[var(--layout-tab-inner-gap)] rounded-[var(--layout-radius-lg)] px-[var(--layout-tab-padding-x)] py-[var(--layout-tab-padding-y)] transition-colors ${
-                isDropdownActive || dropdownOpen
-                  ? "bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)] shadow-sm"
-                  : "text-[var(--color-topbar-text)] hover:bg-[var(--color-topbar-hover-bg)] hover:text-[var(--color-topbar-hover-text)]"
-              }`}
-            >
-              <MoreHorizontal size="var(--icon-tab)" />
-            </button>
-
-            {dropdownOpen && (
-              <div className="absolute left-0 mt-[var(--layout-tree-parent-child-gap)] w-36 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] py-1 shadow-[var(--shadow-panel)] z-50">
-                {[
-                  { key: "video_browse", label: "视频浏览" },
-                  { key: "device_manage", label: "设备管理" },
-                  { key: "work_order", label: "工单管理" },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    onClick={() => handleDropdownSelect(item.key)}
-                    className={`block w-full px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-left text-ui-medium transition-colors hover:bg-[var(--color-hover-bg)] ${
-                      activeTab === item.key ? "text-[var(--color-accent)] font-bold" : "text-[var(--color-text-main)]"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </nav>
-
-        {/* ... 保留右侧的操作按钮区域 ... */}
-      </div>
-    </header>
-  );
-}
-
-
-步骤 1.3：修改 ContentPlaceholder 的组件分发逻辑
-根据 activeTab 渲染不同的页面。注意给 device（原根因诊断）和 device_manage（新增设备管理）传入不同的 readonlyMode 参数。
-
-JavaScript
-function ContentPlaceholder({
-  // ...参数保持不变...
-}) {
-  if (activeTab === "map") {
-    // ... 原有逻辑
-  }
-
-  if (activeTab === "alarm") {
-    // ... 原有逻辑
-  }
-
-  if (activeTab === "device") {
-    // 根因诊断板块：只读模式，不提供新增、编辑、删除等维护操作
-    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={true} />;
-  }
-
-  if (activeTab === "stats") {
-    // ... 原有逻辑
-  }
-  
-  // 新增：设备管理板块（开放全部读写权限）
-  if (activeTab === "device_manage") {
-    return <DeviceManage focusTarget={deviceFocusTarget} resetVersion={deviceResetVersion} onCloseExternalDetail={onCloseExternalDeviceDetail} readonlyMode={false} />;
-  }
-
-  // 新增：视频浏览
-  if (activeTab === "video_browse") {
-    return <VideoBrowse focusTarget={deviceFocusTarget} darkMode={darkMode} />;
-  }
-
-  // 新增：工单管理
-  if (activeTab === "work_order") {
-    return <WorkOrderManage focusTarget={deviceFocusTarget} />;
-  }
-
-  // ... 底部的 fallback 逻辑保持不变
-}
+注：别忘了把 JSX 里头部工具栏的 <button type="button" onClick={loadData}...> 改成 <button type="button" onClick={handleRefresh}...>
 
 
 
-步骤 1.4：更新底部栏提示词
-修改 getPageBottomHint 函数支持新页面：
+2. 后端加速：移除冗余的内存递归，使用扁平查询
+文件： backend/main.py
+修改方案： 弃用 _collect_region_descendant_codes，直接利用 Camera 表原有的级别字段进行精确过滤。
 
-JavaScript
-function getPageBottomHint(activeTab) {
-  const map = {
-    map: "运维大屏工具栏",
-    alarm: "异常告警工具栏",
-    device: "根因诊断工具栏",
-    stats: "统计分析工具栏",
-    video_browse: "视频浏览工具栏",
-    device_manage: "设备管理工具栏",
-    work_order: "工单管理工具栏",
-  };
+改动 1：优化设备列表接口 (/cameras)
+找到 def list_cameras 函数，修改 if region_code: 的处理逻辑：
 
-  return map[activeTab] || "页面工具栏";
-}
-
-
-
-修改方案 2：更新 frontend/src/pages/DeviceManage.jsx
-在 DeviceManage 页面里，我们需要接收由 MasterLayout 传过来的 readonlyMode，并在渲染“新增”按钮和 DeviceTable 内部控制其表现（DeviceTable 已经自带了通过 readonly 隐藏编辑和删除的功能）。
+Python
+    if region_code:
+        # 【优化】不再把整个行政区表拉到内存去查 descendant，直接通过对应层级过滤
+        region = db.get(models.AdministrativeRegion, region_code)
+        if region:
+            if region.level == "province":
+                query = query.filter(models.Camera.province_code == region_code)
+            elif region.level == "city":
+                query = query.filter(models.Camera.city_code == region_code)
+            elif region.level == "county":
+                query = query.filter(models.Camera.county_code == region_code)
+            else:
+                query = query.filter(models.Camera.town_code == region_code)
 
 
-步骤 2.1：修改组件接收参数并透传
-修改 DeviceManage 默认导出函数的签名：
+改动 2：优化大屏统计接口 (/statistics/overview)
+找到 def get_statistics_overview，修改相应的区域拦截器：
 
-JavaScript
-// 增加 readonlyMode 参数，默认为 false
-export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExternalDetail, readonlyMode = false }) {
-  // ... 之前的各类状态和 Effect 等无需修改 ...
-
-
-
-步骤 2.2：控制“新增”相关按钮的显示
-在 DeviceManage 返回的 JSX 渲染中，找到右侧头部的“新增摄像机/服务器”按钮，为其添加 !readonlyMode 条件：
-
-JavaScript
-// 搜索此段代码并作修改：
-<div className="flex justify-end">
-  {activeTab !== "stream" && !readonlyMode && (
-    <button type="button" onClick={() => handleOpenCreate(activeTab)} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-tab-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)]">
-      <Plus size="var(--icon-bottom)" />
-      {activeTab === "camera" ? "新增摄像机" : "新增服务器"}
-    </button>
-  )}
-</div>
+Python
+    if region_code and not scoped_camera_ids:
+        # 【优化】摒弃 _collect_region_descendant_codes
+        region = db.get(models.AdministrativeRegion, region_code)
+        if region:
+            if region.level == "province":
+                camera_query = camera_query.filter(models.Camera.province_code == region_code)
+            elif region.level == "city":
+                camera_query = camera_query.filter(models.Camera.city_code == region_code)
+            elif region.level == "county":
+                camera_query = camera_query.filter(models.Camera.county_code == region_code)
+            else:
+                camera_query = camera_query.filter(models.Camera.town_code == region_code)
+            scope = {"type": "region", "code": region.region_code, "name": region.region_name}
 
 
-步骤 2.3：将 readonlyMode 透传给表格组件
-使得摄像机和服务器的表格在只读状态下也能隐藏操作栏里的编辑和删除。
-在 DeviceManage 的末尾 DeviceTable 渲染部分：
+改动 3：优化左侧导航树的摄像机懒加载接口 (/nav-tree/cameras)
+找到 def get_nav_tree_cameras 函数：
 
-JavaScript
-// 将原本的：
-<DeviceTable columns={cameraColumns} rows={shownCameras} ... />
-// 和：
-<DeviceTable columns={serverColumns} rows={shownServers} ... />
+Python
+    region = _get_region_or_404(db, region_code)
 
-// 修改为（注意添加了 readonly={readonlyMode}）：
-{activeTab === "camera" ? (
-  <DeviceTable columns={cameraColumns} rows={shownCameras} emptyText="当前范围暂无摄像机" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "camera", item }); }} onEdit={(item) => handleOpenEdit("camera", item)} onDelete={(item) => handleDelete("camera", item)} onDiagnose={openDiagnosis} readonly={readonlyMode} />
-) : activeTab === "server" ? (
-  <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
-) : (
-  <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly={true} /> // 这里的 stream 默认本就是只读，所以是 readonly={true} 或者保持原样 readonly
-)}
+    # 【优化】同样基于已保存的层级信息直接查表，告别缓慢的 IN 语句
+    query = db.query(models.Camera)
+    if region.level == "province":
+        query = query.filter(models.Camera.province_code == region_code)
+    elif region.level == "city":
+        query = query.filter(models.Camera.city_code == region_code)
+    elif region.level == "county":
+        query = query.filter(models.Camera.county_code == region_code)
+    else:
+        query = query.filter(models.Camera.town_code == region_code)
 
 
-调整总结
-这个方案做到了如下几点（100% 遵循了 tips.md）：
-
-未硬编码样式：气泡宽度我使用了 min-w-[8rem] 配合 px/py-[var(...)] 的全局变量，没有写死具体像素。下拉框配色使用了 var(--color-panel-bg) 等核心变量自适应浅深色。
-
-共用底层母版：并未在 VideoBrowse 等页面里重复实现侧边树，仅仅是在 Layout 的路由中心将它们挂载上了。
-
-功能完全分离：现在系统里的【根因诊断】标签点击进去就是“只读”看表格点诊断；而下拉框的【设备管理】不仅能诊断，还能实现新增/编辑/删除管理，逻辑实现了彻底复用。
+经过这两端的修改，双击节点到数据渲染的时间将从之前的秒级等待缩短到几乎无感知的几十毫秒。因为你的数据库查询退化成了基于索引的单列匹配，而网络请求体积也直降了 2/3。

@@ -901,11 +901,16 @@ def get_nav_tree_cameras(
     """
     region = _get_region_or_404(db, region_code)
 
-    if region.level == "town":
-        query = db.query(models.Camera).filter(models.Camera.town_code == region_code)
+    # 【优化】同样基于已保存的层级信息直接查表，告别缓慢的 IN 语句
+    query = db.query(models.Camera)
+    if region.level == "province":
+        query = query.filter(models.Camera.province_code == region_code)
+    elif region.level == "city":
+        query = query.filter(models.Camera.city_code == region_code)
+    elif region.level == "county":
+        query = query.filter(models.Camera.county_code == region_code)
     else:
-        region_codes = _collect_region_descendant_codes(db, region_code)
-        query = db.query(models.Camera).filter(models.Camera.town_code.in_(region_codes))
+        query = query.filter(models.Camera.town_code == region_code)
 
     db_status = _camera_db_status_from_filter(status_filter)
     if db_status:
@@ -1624,8 +1629,17 @@ def list_cameras(
     query = db.query(models.Camera)
 
     if region_code:
-        region_codes = _collect_region_descendant_codes(db, region_code)
-        query = query.filter(models.Camera.town_code.in_(region_codes))
+        # 【优化】不再把整个行政区表拉到内存去查 descendant，直接通过对应层级过滤
+        region = db.get(models.AdministrativeRegion, region_code)
+        if region:
+            if region.level == "province":
+                query = query.filter(models.Camera.province_code == region_code)
+            elif region.level == "city":
+                query = query.filter(models.Camera.city_code == region_code)
+            elif region.level == "county":
+                query = query.filter(models.Camera.county_code == region_code)
+            else:
+                query = query.filter(models.Camera.town_code == region_code)
 
     if status_filter:
         query = query.filter(models.Camera.status == status_filter)
@@ -3025,10 +3039,17 @@ def get_statistics_overview(
         scope = {"type": "camera_region", "code": camera.town_code, "name": camera.town_name or camera.name}
 
     if region_code and not scoped_camera_ids:
-        region_codes = _collect_region_descendant_codes(db, region_code)
-        camera_query = camera_query.filter(models.Camera.town_code.in_(region_codes))
+        # 【优化】摒弃 _collect_region_descendant_codes
         region = db.get(models.AdministrativeRegion, region_code)
         if region:
+            if region.level == "province":
+                camera_query = camera_query.filter(models.Camera.province_code == region_code)
+            elif region.level == "city":
+                camera_query = camera_query.filter(models.Camera.city_code == region_code)
+            elif region.level == "county":
+                camera_query = camera_query.filter(models.Camera.county_code == region_code)
+            else:
+                camera_query = camera_query.filter(models.Camera.town_code == region_code)
             scope = {"type": "region", "code": region.region_code, "name": region.region_name}
 
     cameras = camera_query.all()

@@ -1676,30 +1676,49 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     [focusedStreams, keyword, deviceStatusFilter]
   );
 
-  const loadData = async () => {
-    setLoading(true);
-    setError("");
-
+  // 拆分1：只加载不需要跟随行政区变动的数据（服务器、流链路）
+  const loadCommonData = async () => {
     try {
-      const [cameraRows, serverRows, streamRows] = await Promise.all([
-        getDeviceCameras(regionCode ? { region_code: regionCode } : {}),
+      const [serverRows, streamRows] = await Promise.all([
         getDeviceServers(),
         getDeviceStreams(),
       ]);
-
-      setCameras(cameraRows);
       setServers(serverRows);
       setStreams(streamRows);
     } catch (err) {
-      console.error("Failed to load device data:", err);
-      setError(err.message || "设备数据加载失败");
+      console.error("Failed to load common device data:", err);
+    }
+  };
+
+  // 拆分2：跟随左侧树联动的摄像机数据
+  const loadCameraData = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const cameraRows = await getDeviceCameras(regionCode ? { region_code: regionCode } : {});
+      setCameras(cameraRows);
+    } catch (err) {
+      console.error("Failed to load camera data:", err);
+      setError(err.message || "摄像机数据加载失败");
     } finally {
       setLoading(false);
     }
   };
 
+  // 手动刷新按钮逻辑
+  const handleRefresh = async () => {
+    loadCommonData();
+    await loadCameraData();
+  };
+
+  // 仅在组件初次挂载时加载一次服务器和流链路
   useEffect(() => {
-    loadData();
+    loadCommonData();
+  }, []);
+
+  // 当左侧树切换 regionCode 时，仅重新拉取该区域的摄像机
+  useEffect(() => {
+    loadCameraData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionCode, cameraId]);
 
@@ -2025,7 +2044,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
               <Search size="var(--icon-search)" className="text-[var(--color-icon-muted)]" />
               <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索名称、IP、ID" className="min-w-0 flex-1 bg-transparent text-ui-medium text-[var(--color-text-main)] outline-none placeholder:text-[var(--color-text-muted)]" />
             </div>
-            <button type="button" onClick={loadData} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-medium text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+            <button type="button" onClick={handleRefresh} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-medium text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
               <RefreshCw size="var(--icon-bottom)" />
               刷新
             </button>
