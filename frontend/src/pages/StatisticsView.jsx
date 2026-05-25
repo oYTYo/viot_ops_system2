@@ -428,10 +428,10 @@ export default function StatisticsView({ focusTarget, onNavigateToDevice }) {
         </div>
 
         <div className="grid min-w-0 gap-[var(--layout-content-gap)] xl:grid-cols-2">
-          <Panel title="告警类型统计TOP3" icon={AlertTriangle} action={<button type="button" onClick={() => setRankingModal({ title: "告警类型完整表格", items: data?.anomaly_patterns || [], tone: "error" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">完整表格</button>}>
+          <Panel title="告警类型统计TOP3" icon={AlertTriangle} action={<button type="button" onClick={() => setRankingModal({ title: "告警类型完整表格", items: data?.anomaly_patterns || [], tone: "error" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">详情</button>}>
             <RankingList items={data?.anomaly_patterns || []} />
           </Panel>
-          <Panel title="根因实体统计TOP3" icon={TrendingUp} action={<button type="button" onClick={() => setRankingModal({ title: "根因实体完整表格", items: data?.anomaly_entities || [], tone: "accent" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">完整表格</button>}>
+          <Panel title="根因实体统计TOP3" icon={TrendingUp} action={<button type="button" onClick={() => setRankingModal({ title: "根因实体完整表格", items: data?.anomaly_entities || [], tone: "accent" })} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">详情</button>}>
             <RankingList items={data?.anomaly_entities || []} tone="accent" />
           </Panel>
         </div>
