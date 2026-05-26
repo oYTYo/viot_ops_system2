@@ -449,16 +449,6 @@ header * {
   stroke-linejoin: round;
 }
 
-.local-huli-map .viot-map-camera-marker {
-  width: 3rem;
-  height: 3rem;
-}
-
-.local-huli-map .viot-map-camera-marker svg {
-  width: 1.85rem;
-  height: 1.85rem;
-}
-
 .viot-map-camera-marker.is-fault {
   border-color: var(--color-error-text);
   color: var(--color-error-text);
