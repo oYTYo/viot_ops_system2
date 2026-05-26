@@ -2554,41 +2554,134 @@ def _make_video_diagnosis_id(camera_id: str) -> str:
     return f"vd-{safe_camera_id}-{datetime.utcnow():%Y%m%d%H%M%S}-{randint(100, 999)}"[:64]
 
 
-def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
-    server_name = camera.server_id or "流媒体服务器"
+def _diagnosis_branch(key: str, label: str, evidence: str, selected_keys: set[str]) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "evidence": evidence,
+        "selected": key in selected_keys,
+    }
+
+
+def _format_diagnosis_time(value: datetime | None) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value else "未查询到"
+
+
+def _build_demo_diagnosis_flow(selected_keys: set[str]) -> dict[str, Any]:
+    return {
+        "title": "5G 专线故障定位分析流程",
+        "description": "按 IPC 诊断、网络诊断、平台诊断三段展示完整分支，演示时只高亮本次命中的判断路径。",
+        "stages": [
+            {
+                "key": "ipc",
+                "title": "IPC 诊断",
+                "decision": "先判断摄像机是否具备可诊断条件。",
+                "branches": [
+                    _diagnosis_branch("ipc.not_registered", "设备未录入", "首次上线时间为空，无法关联资产台账。", selected_keys),
+                    _diagnosis_branch("ipc.ip_missing", "IP 信息不全", "设备 IP 或归属区域缺失。", selected_keys),
+                    _diagnosis_branch("ipc.power_off", "断电/离线", "硬件监控告警或心跳长时间中断。", selected_keys),
+                    _diagnosis_branch("ipc.normal", "设备侧通过", "设备已录入、IP 完整、基础心跳正常。", selected_keys),
+                ],
+            },
+            {
+                "key": "network",
+                "title": "网络诊断",
+                "decision": "设备侧通过后，继续排查有线网络和专线链路。",
+                "branches": [
+                    _diagnosis_branch("network.unreachable", "链路不可达", "Ping 超时，接入交换机方向不可达。", selected_keys),
+                    _diagnosis_branch("network.packet_loss", "丢包/抖动异常", "流量、前 10 命令计数器和重传指标异常。", selected_keys),
+                    _diagnosis_branch("network.throughput", "吞吐下降", "事务处理数下降，表打开缓存命中率偏低。", selected_keys),
+                    _diagnosis_branch("network.normal", "网络侧通过", "端到端连通性和链路质量指标未触发阈值。", selected_keys),
+                    _diagnosis_branch("network.skipped", "网络诊断跳过", "设备侧已定位到根因，无需继续网络诊断。", selected_keys),
+                ],
+            },
+            {
+                "key": "platform",
+                "title": "平台诊断",
+                "decision": "网络侧未闭环时，继续判断平台服务和上下游状态。",
+                "branches": [
+                    _diagnosis_branch("platform.server_load", "流媒体服务异常", "CPU、转码队列或网卡缓冲区指标异常。", selected_keys),
+                    _diagnosis_branch("platform.downstream", "下级平台异常", "下级平台请求失败或回包超时。", selected_keys),
+                    _diagnosis_branch("platform.upstream", "上级平台异常", "上级平台注册或级联链路异常。", selected_keys),
+                    _diagnosis_branch("platform.normal", "平台侧通过", "平台服务、上下游级联和客户端侧指标正常。", selected_keys),
+                    _diagnosis_branch("platform.skipped", "平台诊断跳过", "前序阶段已定位到根因，无需继续平台诊断。", selected_keys),
+                ],
+            },
+        ],
+        "selected_path": [key for key in selected_keys if not key.endswith(".skipped")],
+    }
+
+
+def _select_demo_diagnosis_scenario(camera: models.Camera, server_name: str) -> dict[str, Any]:
+    if not camera.ip:
+        return {
+            "keys": {"ipc.ip_missing", "network.skipped", "platform.skipped"},
+            "health_score": 35,
+            "business_status": "设备信息缺失",
+            "abnormal_type": "设备信息异常",
+            "root_cause_type": "IPC",
+            "root_cause_node": camera.name,
+            "root_cause_metric": "设备 IP 或归属区域不完整，诊断流程无法进入网络与平台侧。",
+            "hierarchy": {
+                "level1": "IPC 诊断",
+                "level2": "设备信息",
+                "level3": "IP 信息不全",
+                "target": camera.name,
+                "reason": "设备基础台账不完整，无法建立有效的网络探测目标。",
+            },
+            "suggestion": "补齐摄像机 IP、所属区域和接入信息后重新发起诊断。",
+            "ping_output": "缺少有效 IP，未执行 Ping 探测。",
+        }
 
     if camera.status == "offline":
         return {
+            "keys": {"ipc.power_off", "network.unreachable", "platform.skipped"},
             "health_score": 0,
             "business_status": "断连",
             "abnormal_type": "断连",
             "root_cause_type": "网络链路",
             "root_cause_node": "接入交换机端口",
             "root_cause_metric": "ICMP 不可达，设备无响应；同乡镇相邻在线摄像机可达，异常收敛在摄像机接入侧。",
-            "root_cause_hierarchy": {
+            "hierarchy": {
                 "level1": "网络链路",
                 "level2": "上行链路",
                 "level3": "接入端口 / 传输介质",
                 "target": "摄像机上行链路",
                 "reason": "Ping 连续超时，且同区域其他摄像机仍可达，说明核心网络与服务器侧不构成主要瓶颈，根因更可能位于摄像机上行链路的接入端口、网线或现场供电链路。",
             },
-            "conclusion": "摄像机不可达，根因定位到网络链路-上行链路-接入端口/传输介质。",
             "suggestion": "请运维人员优先核对设备 IP、供电状态、接入交换机端口和现场网线连接。",
             "ping_output": f"PING {camera.ip}: request timeout\nPING {camera.ip}: destination host unreachable\n--- {camera.ip} ping statistics ---\n4 packets transmitted, 0 received, 100% packet loss",
-            "steps": [
-                {"index": 1, "title": "读取设备 IP", "status": "done", "description": f"设备 IP：{camera.ip}，开始网络 Ping 探测。"},
-                {"index": 2, "title": "Ping 连通性检测", "status": "failed", "description": "设备 ping 不到，基础网络不可达，诊断流程提前结束。"},
-            ],
         }
 
-    fault_profiles = [
+    if camera.status != "fault":
+        return {
+            "keys": {"ipc.normal", "network.normal", "platform.normal"},
+            "health_score": 92,
+            "business_status": "视频业务健康",
+            "abnormal_type": "无明显异常",
+            "root_cause_type": "无",
+            "root_cause_node": "无",
+            "root_cause_metric": "IPC、网络与平台侧演示检查均未命中异常分支。",
+            "hierarchy": {
+                "level1": "无",
+                "level2": "无",
+                "level3": "无",
+                "target": "无",
+                "reason": "设备侧、网络侧和平台侧均处于正常演示路径。",
+            },
+            "suggestion": "当前无需处置，建议保持常规巡检。",
+            "ping_output": f"PING {camera.ip}: 56 data bytes\n64 bytes from {camera.ip}: icmp_seq=1 ttl=63 time=6.8 ms\n64 bytes from {camera.ip}: icmp_seq=2 ttl=63 time=7.1 ms\n64 bytes from {camera.ip}: icmp_seq=3 ttl=63 time=6.5 ms\n--- {camera.ip} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss",
+        }
+
+    scenarios = [
         {
+            "keys": {"ipc.normal", "network.normal", "platform.server_load"},
+            "health_score": 75,
+            "business_status": "画面轻微拖影",
             "abnormal_type": "拖影",
             "root_cause_type": "服务器",
             "root_cause_node": server_name,
             "root_cause_metric": "转码负荷过高，CPU 利用率 > 95%；多路视频在同一服务器节点同步出现编码延迟。",
-            "score": 75,
-            "business_status": "画面轻微拖影",
             "hierarchy": {
                 "level1": "服务器",
                 "level2": "流媒体服务器",
@@ -2596,14 +2689,16 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
                 "target": server_name,
                 "reason": "Ping 与上行链路指标基本正常，但服务器侧转码队列持续积压，CPU 利用率长时间高于 95%，并影响同服务器承载的多路视频，定位为流媒体服务器 CPU 资源瓶颈。",
             },
+            "suggestion": "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。",
         },
         {
+            "keys": {"ipc.normal", "network.packet_loss", "platform.normal"},
+            "health_score": 68,
+            "business_status": "视频明显卡顿",
             "abnormal_type": "卡顿",
             "root_cause_type": "网络链路",
             "root_cause_node": "摄像机上行链路",
             "root_cause_metric": "高抖动 42ms，频繁重传，吞吐量下降 38%；异常集中在摄像机到服务器方向。",
-            "score": 68,
-            "business_status": "视频明显卡顿",
             "hierarchy": {
                 "level1": "网络链路",
                 "level2": "上行链路",
@@ -2611,14 +2706,16 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
                 "target": "摄像机上行链路",
                 "reason": "客户端下行与服务器负载未出现同步异常，异常重构损失主要集中在上行链路的抖动、重传和吞吐下降指标，定位为上行链路容量不足或队列拥塞。",
             },
+            "suggestion": "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。",
         },
         {
+            "keys": {"ipc.normal", "network.packet_loss", "platform.normal"},
+            "health_score": 62,
+            "business_status": "画面局部花屏",
             "abnormal_type": "花屏",
             "root_cause_type": "网络链路",
             "root_cause_node": "摄像机上行链路",
             "root_cause_metric": "乱序率高，关键帧丢失，丢包率 6.8%；异常片段与上行链路丢包峰值时间对齐。",
-            "score": 62,
-            "business_status": "画面局部花屏",
             "hierarchy": {
                 "level1": "网络链路",
                 "level2": "上行链路",
@@ -2626,14 +2723,16 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
                 "target": "摄像机上行链路",
                 "reason": "花屏片段与关键帧丢失、乱序率升高同步出现，服务器转码与客户端解码指标未达到异常阈值，定位为上行传输介质质量异常。",
             },
+            "suggestion": "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。",
         },
         {
+            "keys": {"ipc.normal", "network.normal", "platform.server_load"},
+            "health_score": 48,
+            "business_status": "链路间歇断连",
             "abnormal_type": "断连",
             "root_cause_type": "服务器",
             "root_cause_node": server_name,
             "root_cause_metric": "网卡缓冲区溢出，服务进程短时无响应；同节点多路流出现短时断续。",
-            "score": 48,
-            "business_status": "链路间歇断连",
             "hierarchy": {
                 "level1": "服务器",
                 "level2": "流媒体服务器",
@@ -2641,64 +2740,118 @@ def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
                 "target": server_name,
                 "reason": "摄像机 Ping 可达，客户端侧无独立异常，但流媒体服务器网卡队列出现突增丢弃，同节点多路视频同时短断，定位为服务器网卡缓冲区瓶颈。",
             },
+            "suggestion": "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。",
         },
     ]
-    selected_profile = fault_profiles[
-        sum(ord(ch) for ch in camera.id) % len(fault_profiles)
-    ]
-    abnormal_type = selected_profile["abnormal_type"]
-    cause_type = selected_profile["root_cause_type"]
-    cause_node = selected_profile["root_cause_node"]
-    cause_metric = selected_profile["root_cause_metric"]
-    score = selected_profile["score"]
-    business_status = selected_profile["business_status"]
-    root_cause_hierarchy = selected_profile["hierarchy"]
+    selected = scenarios[sum(ord(ch) for ch in camera.id) % len(scenarios)]
+    return {
+        "ping_output": f"PING {camera.ip}: 56 data bytes\n64 bytes from {camera.ip}: icmp_seq=1 ttl=63 time=6.8 ms\n64 bytes from {camera.ip}: icmp_seq=2 ttl=63 time=7.1 ms\n64 bytes from {camera.ip}: icmp_seq=3 ttl=63 time=6.5 ms\n--- {camera.ip} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss",
+        **selected,
+    }
 
-    if camera.status != "fault":
-        abnormal_type, cause_type, cause_node, cause_metric, score, business_status = (
-            "无明显异常",
-            "无",
-            "无",
-            "关键指标处于正常阈值内",
-            92,
-            "视频业务健康",
-        )
-        root_cause_hierarchy = {
-            "level1": "无",
-            "level2": "无",
-            "level3": "无",
-            "target": "无",
-            "reason": "Ping、拓扑链路、服务器资源与客户端侧质量指标均处于正常波动范围，未发现可归因的异常根因。",
-        }
+
+def _diagnosis_profile(camera: models.Camera) -> dict[str, Any]:
+    server_name = camera.server_id or "流媒体服务器"
+    scenario = _select_demo_diagnosis_scenario(camera, server_name)
+    selected_keys = set(scenario["keys"])
+    root_cause_hierarchy = scenario["hierarchy"]
+    score = scenario["health_score"]
+    first_online_text = _format_diagnosis_time(camera.created_at)
+    last_heartbeat_text = _format_diagnosis_time(camera.last_heartbeat)
+    conclusion = (
+        "问题归类：未发现明显异常。根因定位：IPC、网络和平台侧均通过。"
+        if score >= 80
+        else f"问题归类：{root_cause_hierarchy['level1']}。根因定位：{root_cause_hierarchy['level2']} - {root_cause_hierarchy['level3']}。"
+    )
+    ipc_blocked = bool({"ipc.ip_missing", "ipc.power_off"} & selected_keys)
+    network_skipped = "network.skipped" in selected_keys
+    ping_unreachable = "network.unreachable" in selected_keys
+    stream_skipped = network_skipped or ping_unreachable
+    stream_quality_abnormal = "network.packet_loss" in selected_keys
+    full_chain_skipped = stream_skipped
 
     return {
         "health_score": score,
-        "business_status": business_status,
-        "abnormal_type": abnormal_type,
-        "root_cause_type": cause_type,
-        "root_cause_node": cause_node,
-        "root_cause_metric": cause_metric,
+        "business_status": scenario["business_status"],
+        "abnormal_type": scenario["abnormal_type"],
+        "root_cause_type": scenario["root_cause_type"],
+        "root_cause_node": scenario["root_cause_node"],
+        "root_cause_metric": scenario["root_cause_metric"],
         "root_cause_hierarchy": root_cause_hierarchy,
-        "conclusion": (
-            f"健康度 {score} 分，{business_status}。"
-            if score >= 80
-            else f"健康度 {score} 分，根因定位到{root_cause_hierarchy['level1']}-{root_cause_hierarchy['level2']}-{root_cause_hierarchy['level3']}。"
-        ),
-            "suggestion": (
-                "当前视频传输状态良好，链路健康。"
-                if score >= 80
-                else (
-                    "建议迁移部分转码任务、检查服务器 CPU 与网卡队列，并复测流媒体服务。"
-                    if cause_type == "服务器"
-                    else "建议检查摄像机上行链路、交换机端口错误包、丢包和抖动，并复测端到端吞吐。"
-                )
-            ),
-        "ping_output": f"PING {camera.ip}: 56 data bytes\n64 bytes from {camera.ip}: icmp_seq=1 ttl=63 time=6.8 ms\n64 bytes from {camera.ip}: icmp_seq=2 ttl=63 time=7.1 ms\n64 bytes from {camera.ip}: icmp_seq=3 ttl=63 time=6.5 ms\n--- {camera.ip} ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss",
+        "conclusion": conclusion,
+        "suggestion": f"处置建议：{scenario['suggestion']}",
+        "ping_output": scenario["ping_output"],
         "steps": [
-            {"index": 1, "title": "读取设备 IP", "status": "done", "description": f"设备 IP：{camera.ip}，开始网络 Ping 探测。"},
-            {"index": 2, "title": "Ping 连通性检测", "status": "done", "description": "Ping 可达，基础网络连通，继续采集链路上下游状态。"},
-            {"index": 3, "title": "获取拓扑信息", "status": "done", "description": "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。"},
-            {"index": 4, "title": "启动根因定位算法", "status": "done", "description": f"根因定位：{root_cause_hierarchy['level1']} → {root_cause_hierarchy['level2']} → {root_cause_hierarchy['level3']}。"},
+            {
+                "index": 1,
+                "title": "IPC 诊断",
+                "status": "failed" if "ipc.power_off" in selected_keys or "ipc.ip_missing" in selected_keys else "done",
+                "description": "检查设备录入、IP 信息、心跳和断电状态，确认是否具备继续诊断条件。",
+                "checks": [
+                    {
+                        "label": "查询设备首次上线时间",
+                        "status": "hit" if "ipc.not_registered" in selected_keys else "pass",
+                        "result": "设备未录入，未查询到首次上线时间。" if "ipc.not_registered" in selected_keys else f"首次上线时间：{first_online_text}。",
+                    },
+                    {
+                        "label": "查询设备 IP 情况",
+                        "status": "hit" if "ipc.ip_missing" in selected_keys else "pass",
+                        "result": "IP 信息不完整" if "ipc.ip_missing" in selected_keys else f"设备 IP：{camera.ip}，信息完整。",
+                    },
+                    {
+                        "label": "接收硬件监控告警",
+                        "status": "hit" if "ipc.power_off" in selected_keys else "pass",
+                        "result": f"命中断电/离线分支，最近心跳时间：{last_heartbeat_text}。" if "ipc.power_off" in selected_keys else f"未发现断电告警，最近心跳时间：{last_heartbeat_text}，继续向网络侧排查。",
+                    },
+                    {
+                        "label": "IPC 阶段结论",
+                        "status": "hit" if ipc_blocked else "pass",
+                        "result": "IPC 侧已定位到根因，后续诊断跳过。" if ipc_blocked else "IPC 侧通过，进入网络诊断。",
+                    },
+                ],
+            },
+            {
+                "index": 2,
+                "title": "网络诊断",
+                "status": "failed" if ping_unreachable or stream_quality_abnormal else "done",
+                "description": "检查 Ping 连通性，并在网络可达后尝试开流。",
+                "checks": [
+                    {
+                        "label": "Ping 连通性检测",
+                        "status": "skip" if network_skipped else "hit" if ping_unreachable else "pass",
+                        "result": "前序 IPC 已定位，跳过网络诊断。" if network_skipped else "Ping 不通，第三步跳过。" if ping_unreachable else "Ping 可达，继续尝试开流。",
+                    },
+                    {
+                        "label": "尝试开流",
+                        "status": "skip" if stream_skipped else "hit" if stream_quality_abnormal else "pass",
+                        "result": "Ping 不通，跳过开流尝试。" if stream_skipped else "开流成功，但发现视频质量异常。" if stream_quality_abnormal else "开流成功，进入全链路信息采集。",
+                    },
+                ],
+            },
+            {
+                "index": 3,
+                "title": "采集全链路信息",
+                "status": "done",
+                "description": "开流成功后采集摄像机链路、视频流状态和平台关联信息。",
+                "checks": [
+                    {
+                        "label": "采集全链路信息",
+                        "status": "skip" if full_chain_skipped else "pass",
+                        "result": "Ping 不通，第三步跳过。" if full_chain_skipped else "摄像机链路、视频流状态和平台关联信息采集完成。",
+                    },
+                ],
+            },
+            {
+                "index": 4,
+                "title": "生成诊断结论",
+                "status": "done",
+                "description": f"{conclusion} 处置建议：{scenario['suggestion']}",
+                "checks": [
+                    {"label": "问题归类", "status": "hit" if score < 80 else "pass", "result": root_cause_hierarchy["level1"]},
+                    {"label": "根因定位", "status": "hit" if score < 80 else "pass", "result": f"{root_cause_hierarchy['level2']} - {root_cause_hierarchy['level3']}"},
+                    {"label": "处置建议", "status": "pass", "result": scenario["suggestion"]},
+                ],
+            },
         ],
     }
 
@@ -2832,7 +2985,11 @@ def run_video_diagnosis(camera_id: str, db: Session = Depends(get_db)):
 
     started_at = datetime.utcnow()
     profile = _diagnosis_profile(camera)
-    diagnosis_fields = {key: value for key, value in profile.items() if key != "root_cause_hierarchy"}
+    diagnosis_fields = {
+        key: value
+        for key, value in profile.items()
+        if key not in {"root_cause_hierarchy", "diagnosis_flow"}
+    }
     ended_at = started_at + timedelta(seconds=randint(8, 16))
 
     obj = models.VideoDiagnosis(
