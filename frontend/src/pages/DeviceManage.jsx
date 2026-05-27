@@ -395,9 +395,9 @@ function useRollingValues(initialValues, { min = 0, max = 100, step = 8, active 
   return values;
 }
 
-function InfoLine({ label, value, mono = false, wrap = false }) {
+function InfoLine({ label, value, mono = false, wrap = false, keepBorder = false }) {
   return (
-    <div className="grid grid-cols-[8rem_minmax(0,1fr)] items-center gap-[var(--layout-search-gap)] border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-ui-medium last:border-b-0">
+    <div className={`grid grid-cols-[8rem_minmax(0,1fr)] items-center gap-[var(--layout-search-gap)] border-b border-[var(--color-panel-border)] py-[var(--layout-search-padding-y)] text-ui-medium ${keepBorder ? "" : "last:border-b-0"}`}>
       <span className="whitespace-nowrap text-[var(--color-text-muted)]">{label}</span>
       <span className={`min-w-0 text-[var(--color-text-main)] ${wrap ? "whitespace-normal break-words" : "whitespace-nowrap truncate"} ${mono ? "font-mono" : ""}`}>{formatValue(value)}</span>
     </div>
@@ -843,7 +843,7 @@ function RootCauseResultCard({ diagnosis }) {
       <div className="grid gap-[var(--layout-search-gap)] text-ui-medium lg:grid-cols-3">
         <InfoLine label="一级根因" value={hierarchy.level1} />
         <InfoLine label="二级根因" value={hierarchy.level2} />
-        <InfoLine label="三级根因" value={hierarchy.level3} wrap />
+        <InfoLine label="三级根因" value={hierarchy.level3} wrap keepBorder />
       </div>
       <div className="mt-[var(--layout-search-gap)] text-ui-medium">
         <InfoLine label="定位依据" value={hierarchy.reason} wrap />
@@ -925,6 +925,57 @@ function MiniTopology({ diagnosis, camera, running = false, progress = 100 }) {
   );
 }
 
+function DiagnosisFlowTree({ flow }) {
+  const stages = flow?.stages || [];
+  if (!stages.length) return null;
+
+  return (
+    <div className="mt-[var(--layout-search-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+      <div className="flex min-w-0 items-center justify-between gap-[var(--layout-content-gap)]">
+        <div className="truncate text-ui-medium font-bold text-[var(--color-text-main)]">{flow.title || "诊断流程树"}</div>
+        <div className="shrink-0 text-ui-small text-[var(--color-text-muted)]">高亮为本次命中路径</div>
+      </div>
+      <div className="mt-[var(--layout-search-gap)] grid gap-[var(--layout-search-gap)] lg:grid-cols-3">
+        {stages.map((stage) => (
+          <div key={stage.key} className="min-w-0 rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-padding-x)]">
+            <div className="text-ui-medium font-bold text-[var(--color-text-main)]">{stage.title}</div>
+            <div className="mt-[var(--layout-tree-gap)] text-ui-small text-[var(--color-text-muted)]">{stage.decision}</div>
+            <div className="mt-[var(--layout-search-gap)] space-y-[var(--layout-tree-gap)]">
+              {(stage.branches || []).map((branch) => (
+                <div
+                  key={branch.key}
+                  className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] ${
+                    branch.selected
+                      ? "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]"
+                      : "border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-[var(--color-text-muted)] opacity-70"
+                  }`}
+                >
+                  <div className="text-ui-small font-semibold">{branch.label}</div>
+                  <div className="mt-[var(--layout-tree-gap)] text-ui-small leading-snug">{branch.evidence}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function diagnosisCheckTone(status) {
+  if (status === "running") return "border-[var(--color-accent)] bg-[var(--color-panel-bg)] text-[var(--color-accent)]";
+  if (status === "hit") return "border-[var(--color-error-text)] bg-[var(--color-error-bg)] text-[var(--color-error-text)]";
+  if (status === "skip") return "border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-text-muted)]";
+  return "border-[var(--color-accent)] bg-[var(--color-hover-bg)] text-[var(--color-accent)]";
+}
+
+function diagnosisCheckLabel(status) {
+  if (status === "running") return "检测中";
+  if (status === "hit") return "命中";
+  if (status === "skip") return "跳过";
+  return "通过";
+}
+
 function InferenceProgress({ progress = 0 }) {
   const safeProgress = Math.max(0, Math.min(100, progress));
   return (
@@ -946,6 +997,11 @@ function InferenceProgress({ progress = 0 }) {
 
 function DiagnosisStep({ step, pingOutput, expanded, onToggle, children }) {
   const summary = `${step.title}：${step.description}`;
+  const runningCheckIndex = step.checks?.findIndex((check) => check.status === "running") ?? -1;
+  const checkProgress = step.checks?.length
+    ? Math.round(((runningCheckIndex >= 0 ? runningCheckIndex + 0.35 : step.checks.length) / step.checks.length) * 100)
+    : 0;
+  const showCheckDetails = step.index !== 4;
 
   return (
     <div className="group rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)]">
@@ -973,6 +1029,27 @@ function DiagnosisStep({ step, pingOutput, expanded, onToggle, children }) {
             <pre className="diagnosis-terminal mt-[var(--layout-search-gap)] overflow-visible rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small">
               {pingOutput}
             </pre>
+          )}
+          {showCheckDetails && runningCheckIndex >= 0 && (
+            <div className="mt-[var(--layout-search-gap)]">
+              <div className="h-[0.4rem] overflow-hidden rounded-full bg-[var(--color-panel-border)]">
+                <div className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-500" style={{ width: `${checkProgress}%` }} />
+              </div>
+              <div className="mt-[var(--layout-tree-gap)] text-ui-small text-[var(--color-accent)]">正在执行：{step.checks[runningCheckIndex].label}</div>
+            </div>
+          )}
+          {showCheckDetails && !!step.checks?.length && (
+            <div className="mt-[var(--layout-search-gap)] space-y-[var(--layout-tree-gap)]">
+              {step.checks.map((check) => (
+                <div key={check.label} className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] ${diagnosisCheckTone(check.status)}`}>
+                  <div className="flex min-w-0 items-center justify-between gap-[var(--layout-search-gap)]">
+                    <span className="truncate text-ui-small font-semibold">{check.label}</span>
+                    <span className="shrink-0 text-ui-small">{diagnosisCheckLabel(check.status)}</span>
+                  </div>
+                  <div className="mt-[var(--layout-tree-gap)] text-ui-small leading-snug">{check.result}</div>
+                </div>
+              ))}
+            </div>
           )}
           {children}
         </div>
@@ -1010,6 +1087,38 @@ function buildPingLines(camera) {
   ];
 }
 
+function diagnosisCheckDelay(stepIndex, checkIndex) {
+  if (stepIndex === 1) return checkIndex === 0 ? 1200 : 950;
+  if (stepIndex === 2) return checkIndex === 0 ? 650 : 1000;
+  if (stepIndex === 3) return 4500;
+  return 700;
+}
+
+function diagnosisRunningResult(check) {
+  if (check.label.includes("Ping")) return "正在执行 Ping 连通性测试，等待全部回显完成。";
+  if (check.label.includes("全链路")) return "正在采集摄像机、网络节点、流媒体服务器和客户端侧指标。";
+  return `正在${check.label}，等待检测结果。`;
+}
+
+function buildRunningDiagnosisSteps(sourceSteps, stage, activeCheckIndex) {
+  return sourceSteps
+    .filter((step) => step.index <= stage)
+    .map((step) => {
+      if (step.index < stage) return step;
+      const checks = step.checks || [];
+      const visibleChecks = checks.slice(0, Math.min(checks.length, activeCheckIndex + 1));
+      return {
+        ...step,
+        status: "running",
+        checks: visibleChecks.map((check, index) => (
+          index === visibleChecks.length - 1 && check.status !== "skip"
+            ? { ...check, status: "running", result: diagnosisRunningResult(check) }
+            : check
+        )),
+      };
+    });
+}
+
 function VideoDiagnosisView({ camera, onClose }) {
   const scrollRef = useRef(null);
   const stepRefs = useRef({});
@@ -1023,6 +1132,8 @@ function VideoDiagnosisView({ camera, onClose }) {
   const [inferenceProgressValue, setInferenceProgressValue] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState(null);
   const [runEndedAt, setRunEndedAt] = useState(null);
+  const [pendingDiagnosis, setPendingDiagnosis] = useState(null);
+  const [activeCheckIndex, setActiveCheckIndex] = useState(0);
   const marqueeItems = [
     "读取历史状态时间窗",
     "分析上下游联动影响",
@@ -1030,10 +1141,12 @@ function VideoDiagnosisView({ camera, onClose }) {
     "比对流媒体转码负荷",
     "计算三级根因置信度",
   ];
+  const pingLines = buildPingLines(camera);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setPendingDiagnosis(null);
     getLatestVideoDiagnosis(camera.id)
       .then((data) => {
         if (!cancelled) setDiagnosis(data);
@@ -1053,34 +1166,75 @@ function VideoDiagnosisView({ camera, onClose }) {
     if (!running) return undefined;
     setStage(1);
     setExpandedStep(1);
+    setActiveCheckIndex(0);
     setTopologyProgress(0);
     setInferenceProgressValue(0);
     setPingLineCount(0);
-    const timers = camera.status === "offline"
-      ? [window.setTimeout(() => setStage(2), 2200)]
-      : [
-          window.setTimeout(() => setStage(2), 2200),
-          window.setTimeout(() => setStage(3), 8200),
-          window.setTimeout(() => setStage(4), 10800),
-        ];
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    return undefined;
   }, [running, camera.status]);
 
   useEffect(() => {
     if (!running || stage !== 2) return undefined;
     setPingLineCount(1);
-    const total = buildPingLines(camera).length;
+    const total = pingLines.length;
     const timer = window.setInterval(() => {
       setPingLineCount((value) => Math.min(total, value + 1));
     }, camera.status === "offline" ? 950 : 650);
     return () => window.clearInterval(timer);
-  }, [running, stage, camera]);
+  }, [running, stage, camera.status, pingLines.length]);
+
+  const pingComplete = running && stage >= 2 && pingLineCount >= pingLines.length;
+
+  useEffect(() => {
+    if (!running || !pendingDiagnosis) return undefined;
+
+    const sourceSteps = pendingDiagnosis.steps || [];
+    const currentStep = sourceSteps.find((step) => step.index === stage);
+    if (!currentStep) return undefined;
+
+    const checks = currentStep.checks || [];
+    if (!checks.length) {
+      const nextStep = sourceSteps.find((step) => step.index > stage);
+      if (nextStep) {
+        setStage(nextStep.index);
+        setActiveCheckIndex(0);
+      }
+      return undefined;
+    }
+
+    if (stage === 2 && activeCheckIndex === 0 && !pingComplete) return undefined;
+
+    const timer = window.setTimeout(() => {
+      if (activeCheckIndex < checks.length - 1) {
+        setActiveCheckIndex((value) => value + 1);
+        return;
+      }
+
+      const nextStep = sourceSteps.find((step) => step.index > stage);
+      if (nextStep) {
+        setStage(nextStep.index);
+        setActiveCheckIndex(0);
+        return;
+      }
+
+      const completedAt = new Date();
+      setDiagnosis({ ...pendingDiagnosis, ended_at: completedAt.toISOString() });
+      setPendingDiagnosis(null);
+      setRunEndedAt(completedAt);
+      setTopologyProgress(100);
+      setInferenceProgressValue(100);
+      setRunning(false);
+      setExpandedStep(4);
+    }, diagnosisCheckDelay(stage, activeCheckIndex));
+
+    return () => window.clearTimeout(timer);
+  }, [running, pendingDiagnosis, stage, activeCheckIndex, pingComplete]);
 
   useEffect(() => {
     if (!running || stage !== 3) return undefined;
     setTopologyProgress(0);
     const timer = window.setInterval(() => {
-      setTopologyProgress((value) => Math.min(100, value + 14));
+      setTopologyProgress((value) => Math.min(96, value + 7));
     }, 320);
     return () => window.clearInterval(timer);
   }, [running, stage]);
@@ -1105,44 +1259,31 @@ function VideoDiagnosisView({ camera, onClose }) {
     setInferenceProgressValue(0);
     setRunStartedAt(startedAt);
     setRunEndedAt(null);
+    setPendingDiagnosis(null);
+    setActiveCheckIndex(0);
     try {
-      const started = Date.now();
       const data = await runVideoDiagnosis(camera.id);
-      const elapsed = Date.now() - started;
-      const minDuration = camera.status === "offline" ? 8600 : 16400;
-      window.setTimeout(() => {
-        setDiagnosis(data);
-        setRunEndedAt(new Date(data.ended_at || Date.now()));
-        setTopologyProgress(100);
-        setInferenceProgressValue(100);
-        setStage(camera.status === "offline" ? 2 : 4);
-        setRunning(false);
-        setExpandedStep(null);
-      }, Math.max(0, minDuration - elapsed));
+      setPendingDiagnosis(data);
     } catch (error) {
       console.error("Failed to run diagnosis:", error);
       setRunning(false);
     }
   };
 
-  const pingLines = buildPingLines(camera);
-  const pingComplete = running && stage >= 2 && pingLineCount >= pingLines.length;
+  const displayDiagnosis = running ? pendingDiagnosis : diagnosis;
+  const diagnosisBackedSteps = displayDiagnosis?.steps || [];
 
   const steps = running
-    ? [
-        { index: 1, title: "读取设备 IP", status: "done", description: `设备 IP：${camera.ip}，开始网络 Ping 探测。` },
-        ...(stage >= 2 ? [{
-          index: 2,
-          title: "Ping 连通性检测",
-          status: pingComplete && camera.status === "offline" ? "failed" : "done",
-          description: !pingComplete
-            ? "正在执行 Ping 连通性测试，等待全部回显完成。"
-            : camera.status === "offline"
-              ? "设备 ping 不到，建议重新检查设备 IP 是否正确。"
-              : "Ping 可达，基础网络连通，继续第三步。",
-        }] : []),
-        ...(stage >= 3 && camera.status !== "offline" ? [{ index: 3, title: "获取拓扑信息", status: "done", description: "摄像机 → 网络节点 → 流媒体服务器 → 客户端，正在采集全链路指标。" }] : []),
-        ...(stage >= 4 && camera.status !== "offline" ? [{ index: 4, title: "启动根因定位算法", status: "done", description: marqueeItems[stage % marqueeItems.length] }] : []),
+    ? diagnosisBackedSteps.length
+      ? buildRunningDiagnosisSteps(diagnosisBackedSteps, stage, activeCheckIndex)
+      : [
+        {
+          index: 1,
+          title: "准备诊断任务",
+          status: "running",
+          description: "正在获取设备诊断配置和历史状态。",
+          checks: [{ label: "读取诊断配置", status: "running", result: "正在读取摄像机台账、心跳和链路关系。" }],
+        },
       ]
     : (diagnosis?.steps || []).filter((step) => step.index !== 5);
 
@@ -1228,8 +1369,10 @@ function VideoDiagnosisView({ camera, onClose }) {
                           expanded={expandedStep === step.index}
                           onToggle={() => setExpandedStep((value) => (value === step.index ? null : step.index))}
                         >
-                          {step.index === 3 && (
-                            <MiniTopology diagnosis={diagnosis} camera={camera} running={running} progress={topologyDisplayProgress} />
+                          {step.index === 3 && !step.checks?.every((check) => check.status === "skip") && (
+                            <>
+                              <MiniTopology diagnosis={displayDiagnosis} camera={camera} running={running} progress={topologyDisplayProgress} />
+                            </>
                           )}
                           {step.index === 4 && (running || diagnosis) && (
                             <>
