@@ -1090,12 +1090,13 @@ function buildPingLines(camera) {
 function diagnosisCheckDelay(stepIndex, checkIndex) {
   if (stepIndex === 1) return checkIndex === 0 ? 1200 : 950;
   if (stepIndex === 2) return checkIndex === 0 ? 650 : 1000;
-  if (stepIndex === 3) return 950;
+  if (stepIndex === 3) return 4500;
   return 700;
 }
 
 function diagnosisRunningResult(check) {
   if (check.label.includes("Ping")) return "正在执行 Ping 连通性测试，等待全部回显完成。";
+  if (check.label.includes("全链路")) return "正在采集摄像机、网络节点、流媒体服务器和客户端侧指标。";
   return `正在${check.label}，等待检测结果。`;
 }
 
@@ -1233,7 +1234,7 @@ function VideoDiagnosisView({ camera, onClose }) {
     if (!running || stage !== 3) return undefined;
     setTopologyProgress(0);
     const timer = window.setInterval(() => {
-      setTopologyProgress((value) => Math.min(100, value + 14));
+      setTopologyProgress((value) => Math.min(96, value + 7));
     }, 320);
     return () => window.clearInterval(timer);
   }, [running, stage]);
