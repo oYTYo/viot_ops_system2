@@ -87,6 +87,15 @@ class ServerBase(BaseModel):
     longitude: float | None = None
     latitude: float | None = None
 
+    province_code: str = Field(default="", max_length=64)
+    province_name: str = Field(default="", max_length=64)
+    city_code: str = Field(default="", max_length=64)
+    city_name: str = Field(default="", max_length=64)
+    county_code: str = Field(default="", max_length=64)
+    county_name: str = Field(default="", max_length=64)
+    town_code: str = Field(default="", max_length=64)
+    town_name: str = Field(default="", max_length=64)
+
     cpu_usage: float | None = None
     ram_usage: float | None = None
     disk_usage: float | None = None
@@ -111,6 +120,15 @@ class ServerUpdate(BaseModel):
 
     longitude: float | None = None
     latitude: float | None = None
+
+    province_code: str | None = Field(default=None, max_length=64)
+    province_name: str | None = Field(default=None, max_length=64)
+    city_code: str | None = Field(default=None, max_length=64)
+    city_name: str | None = Field(default=None, max_length=64)
+    county_code: str | None = Field(default=None, max_length=64)
+    county_name: str | None = Field(default=None, max_length=64)
+    town_code: str | None = Field(default=None, max_length=64)
+    town_name: str | None = Field(default=None, max_length=64)
 
     cpu_usage: float | None = None
     ram_usage: float | None = None
@@ -299,7 +317,7 @@ class StreamMediaBase(BaseModel):
     destination_ip: str = Field(..., max_length=45)
     destination_port: int
 
-    ssrc: str = Field(..., max_length=64)
+    ssrc: str | None = Field(default=None, max_length=64)
 
     camera_id: str | None = Field(default=None, max_length=64)
     server_id: str | None = Field(default=None, max_length=64)

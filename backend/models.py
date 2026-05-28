@@ -125,6 +125,10 @@ class Server(Base):
         Index("ix_server_ip", "ip"),
         Index("ix_server_status", "status"),
         Index("ix_server_node_type", "node_type"),
+        Index("ix_server_province_code", "province_code"),
+        Index("ix_server_city_code", "city_code"),
+        Index("ix_server_county_code", "county_code"),
+        Index("ix_server_town_code", "town_code"),
         {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
     )
 
@@ -143,6 +147,15 @@ class Server(Base):
 
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    province_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    province_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    city_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    city_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    county_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    county_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    town_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    town_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
 
     cpu_usage: Mapped[float | None] = mapped_column(Float, nullable=True)
     ram_usage: Mapped[float | None] = mapped_column(Float, nullable=True)

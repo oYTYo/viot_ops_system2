@@ -19,6 +19,7 @@ import {
 import {
   createDeviceCamera,
   createDeviceServer,
+  createStreamSegment,
   deleteDeviceCamera,
   deleteDeviceServer,
   getDeviceCameras,
@@ -26,6 +27,8 @@ import {
   getDeviceStreams,
   updateDeviceCamera,
   updateDeviceServer,
+  updateDeviceStream,
+  updateStreamSegment,
 } from "../services/deviceApi";
 import { getRegionByCode, getRegions } from "../services/regionApi";
 import { getCameraPreview } from "../services/videoApi";
@@ -71,6 +74,14 @@ const serverInitialForm = {
   location_desc: "",
   longitude: "",
   latitude: "",
+  province_code: "",
+  province_name: "",
+  city_code: "",
+  city_name: "",
+  county_code: "",
+  county_name: "",
+  town_code: "",
+  town_name: "",
   cpu_usage: "",
   ram_usage: "",
   disk_usage: "",
@@ -89,6 +100,18 @@ function toNumberOrNull(value) {
   if (text === null) return null;
   const number = Number(text);
   return Number.isFinite(number) ? number : null;
+}
+
+function toIntegerOrNull(value) {
+  const text = emptyToNull(value);
+  if (text === null) return null;
+  const number = Number(text);
+  return Number.isInteger(number) ? number : null;
+}
+
+function toBoolean(value) {
+  if (typeof value === "boolean") return value;
+  return String(value).toLowerCase() === "true";
 }
 
 function formatValue(value, fallback = "-") {
@@ -114,15 +137,18 @@ function formatStreamSsrcHex(value, fallback = "-") {
 }
 
 function cameraStatusText(status) {
-  if (status === "offline") return "离线";
-  if (status === "fault") return "异常";
+  const normalized = normalizeOperationalStatus(status);
+  if (normalized === "offline") return "离线";
+  if (normalized === "fault") return "异常";
   return "在线";
 }
 
 function serverStatusText(status) {
-  if (status === "offline") return "离线";
-  if (status === "fault") return "异常";
-  if (status === "warning") return "告警";
+  const text = String(status || "").trim();
+  const normalized = normalizeOperationalStatus(status);
+  if (normalized === "offline") return "离线";
+  if (text === "warning" || text === "告警") return "告警";
+  if (normalized === "fault") return "异常";
   return "正常";
 }
 
@@ -169,9 +195,15 @@ function normalizeKeyPart(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeFlowDeviceId(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{16,32}(?:_\d+)?)(?:_\d{10,}_[A-Za-z0-9]+)$/);
+  return match ? match[1] : text;
+}
+
 function buildStreamIdentity(stream) {
   return [
-    stream.camera_id || stream.device_id || stream.display_id,
+    normalizeFlowDeviceId(stream.camera_id || stream.device_id || stream.display_id),
     stream.source_ip,
     stream.source_port,
     stream.destination_ip || stream.server_id,
@@ -183,13 +215,14 @@ function buildStreamIdentity(stream) {
 function normalizeMatchFlowToStream(flow) {
   const uplink = flow.uplink || {};
   const downlinks = Array.isArray(flow.downlink) ? flow.downlink : [];
+  const deviceId = normalizeFlowDeviceId(flow.device_id);
   const ssrc = uplink.ssrc_hex || uplink.ssrc || "";
   const connected = isActiveFlowConnected(flow);
   const segments = [
     ...(uplink.ip_src || uplink.ip_dst
       ? [
           {
-            id: `${flow.device_id}-uplink`,
+            id: `${deviceId}-uplink`,
             direction: "uplink",
             source_ip: uplink.ip_src,
             source_port: uplink.port_src,
@@ -202,7 +235,7 @@ function normalizeMatchFlowToStream(flow) {
         ]
       : []),
     ...downlinks.map((item, index) => ({
-      id: `${flow.device_id}-downlink-${index}`,
+      id: `${deviceId}-downlink-${index}`,
       direction: "downlink",
       source_ip: item.ip_src,
       source_port: item.port_src,
@@ -215,11 +248,11 @@ function normalizeMatchFlowToStream(flow) {
   ];
 
   return {
-    id: `active-${flow.device_id}`,
-    display_id: flow.device_id,
-    device_id: flow.device_id,
-    camera_id: flow.device_id,
-    camera_name: flow.camera_name,
+    id: `active-${deviceId}`,
+    display_id: deviceId,
+    device_id: deviceId,
+    camera_id: deviceId,
+    camera_name: flow.camera_name || deviceId,
     server_id: flow.server_ip || "",
     source_ip: uplink.ip_src || flow.camera_ip || "",
     source_port: uplink.port_src || "",
@@ -271,10 +304,19 @@ function streamStatusClass(stream) {
   return statusClass("normal");
 }
 
+function normalizeOperationalStatus(status) {
+  const text = String(status || "").trim().toLowerCase();
+  if (["normal", "online", "正常", "在线"].includes(text)) return "normal";
+  if (["offline", "离线"].includes(text)) return "offline";
+  if (["fault", "warning", "异常", "告警"].includes(text)) return "fault";
+  return text || "normal";
+}
+
 function statusClass(status) {
-  if (status === "offline") return "border-[var(--color-panel-border)] text-[var(--color-text-muted)] bg-[var(--color-control-bg)]";
-  if (status === "fault") return "border-[var(--color-error-text)] text-[var(--color-error-text)] bg-[var(--color-error-bg)]";
-  if (status === "warning") return "border-amber-500 text-amber-600 bg-amber-500/10";
+  const normalized = normalizeOperationalStatus(status);
+  if (normalized === "offline") return "border-[var(--color-panel-border)] text-[var(--color-text-muted)] bg-[var(--color-control-bg)]";
+  if (String(status || "").trim().toLowerCase() === "warning" || String(status || "").trim() === "告警") return "border-amber-500 text-amber-600 bg-amber-500/10";
+  if (normalized === "fault") return "border-[var(--color-error-text)] text-[var(--color-error-text)] bg-[var(--color-error-bg)]";
   return "border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-hover-bg)]";
 }
 
@@ -294,11 +336,58 @@ function normalizeServerForm(server) {
     ...server,
     longitude: server.longitude ?? "",
     latitude: server.latitude ?? "",
+    province_code: server.province_code || "",
+    province_name: server.province_name || "",
+    city_code: server.city_code || "",
+    city_name: server.city_name || "",
+    county_code: server.county_code || "",
+    county_name: server.county_name || "",
+    town_code: server.town_code || "",
+    town_name: server.town_name || "",
     cpu_usage: server.cpu_usage ?? "",
     ram_usage: server.ram_usage ?? "",
     disk_usage: server.disk_usage ?? "",
     net_bandwidth: server.net_bandwidth ?? "",
     gpu_usage: server.gpu_usage ?? "",
+  };
+}
+
+function normalizeStreamSegmentForm(segment) {
+  return {
+    id: segment.id,
+    direction: segment.direction || "uplink",
+    source_ip: segment.source_ip ?? "",
+    source_port: segment.source_port ?? "",
+    destination_ip: segment.destination_ip ?? "",
+    destination_port: segment.destination_port ?? "",
+    ssrc: segment.ssrc ?? "",
+    status: segment.status || "online",
+    is_fault: Boolean(segment.is_fault),
+  };
+}
+
+function normalizeStreamForm(stream) {
+  const cameraId = normalizeFlowDeviceId(stream.camera_id);
+  const displayId = normalizeFlowDeviceId(stream.display_id || stream.device_id || cameraId || stream.id);
+  return {
+    id: stream.id,
+    display_id: displayId,
+    camera_id: cameraId || "",
+    server_id: stream.server_id || "",
+    source_ip: stream.source_ip ?? "",
+    source_port: stream.source_port ?? "",
+    destination_ip: stream.destination_ip ?? "",
+    destination_port: stream.destination_port ?? "",
+    ssrc: stream.ssrc ?? "",
+    codec: stream.codec ?? "",
+    resolution: stream.resolution ?? "",
+    frame_rate: stream.frame_rate ?? "",
+    transport_protocol: stream.transport_protocol || "UDP",
+    is_connected: String(Boolean(stream.is_connected)),
+    is_fault: String(Boolean(stream.is_fault)),
+    link_type: stream.link_type ?? "",
+    stream_type: stream.stream_type ?? "",
+    segments: Array.isArray(stream.segments) ? stream.segments.map(normalizeStreamSegmentForm) : [],
   };
 }
 
@@ -338,11 +427,62 @@ function buildServerPayload(form) {
     location_desc: emptyToNull(form.location_desc),
     longitude: toNumberOrNull(form.longitude),
     latitude: toNumberOrNull(form.latitude),
+    province_code: emptyToNull(form.province_code) || "",
+    province_name: emptyToNull(form.province_name) || "",
+    city_code: emptyToNull(form.city_code) || "",
+    city_name: emptyToNull(form.city_name) || "",
+    county_code: emptyToNull(form.county_code) || "",
+    county_name: emptyToNull(form.county_name) || "",
+    town_code: emptyToNull(form.town_code) || "",
+    town_name: emptyToNull(form.town_name) || "",
     cpu_usage: toNumberOrNull(form.cpu_usage),
     ram_usage: toNumberOrNull(form.ram_usage),
     disk_usage: toNumberOrNull(form.disk_usage),
     net_bandwidth: toNumberOrNull(form.net_bandwidth),
     gpu_usage: toNumberOrNull(form.gpu_usage),
+  };
+}
+
+function buildStreamPayload(form) {
+  const cameraId = normalizeFlowDeviceId(form.camera_id);
+  return {
+    source_ip: emptyToNull(form.source_ip) || "",
+    source_port: toIntegerOrNull(form.source_port),
+    destination_ip: emptyToNull(form.destination_ip) || "",
+    destination_port: toIntegerOrNull(form.destination_port),
+    ssrc: emptyToNull(form.ssrc),
+    camera_id: emptyToNull(cameraId),
+    server_id: emptyToNull(form.server_id),
+    codec: emptyToNull(form.codec),
+    resolution: emptyToNull(form.resolution),
+    frame_rate: toNumberOrNull(form.frame_rate),
+    transport_protocol: emptyToNull(form.transport_protocol),
+    is_connected: toBoolean(form.is_connected),
+    is_fault: toBoolean(form.is_fault),
+    link_type: emptyToNull(form.link_type),
+    stream_type: emptyToNull(form.stream_type),
+  };
+}
+
+function buildStreamSegmentPayload(segment) {
+  return {
+    direction: segment.direction || "uplink",
+    source_ip: emptyToNull(segment.source_ip) || "",
+    source_port: toIntegerOrNull(segment.source_port),
+    destination_ip: emptyToNull(segment.destination_ip) || "",
+    destination_port: toIntegerOrNull(segment.destination_port),
+    ssrc: emptyToNull(segment.ssrc),
+    status: emptyToNull(segment.status) || "online",
+    is_fault: toBoolean(segment.is_fault),
+  };
+}
+
+function buildStreamSegmentCreatePayload(streamId, segment) {
+  const payload = buildStreamSegmentPayload(segment);
+  return {
+    ...payload,
+    stream_media_id: streamId,
+    segment_key: `${streamId}-${payload.direction}-${payload.source_ip}-${payload.destination_ip}-${payload.ssrc || ""}-${Date.now()}`,
   };
 }
 
@@ -359,11 +499,11 @@ const filterByStatus = (items, type, statusFilter) => {
   if (statusFilter === "all") return items;
   return items.filter(item => {
     if (type === "camera") {
-      const mappedStatus = item.status === "online" ? "normal" : item.status;
+      const mappedStatus = normalizeOperationalStatus(item.status);
       return mappedStatus === statusFilter;
     }
     if (type === "server") {
-      const mappedStatus = (item.status === "warning" || item.status === "fault") ? "fault" : item.status;
+      const mappedStatus = normalizeOperationalStatus(item.status);
       return mappedStatus === statusFilter;
     }
     if (type === "stream") {
@@ -475,16 +615,20 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDia
                       <button type="button" title="详情" onClick={() => onView(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
                         <Eye size="var(--icon-tree-main)" />
                       </button>
-                      {!readonly && (
-                        <>
+                    {!readonly && (
+                      <>
+                        {onEdit && (
                           <button type="button" title="编辑" onClick={() => onEdit(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
                             <Edit3 size="var(--icon-tree-main)" />
                           </button>
+                        )}
+                        {onDelete && (
                           <button type="button" title="删除" onClick={() => onDelete(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)]">
                             <Trash2 size="var(--icon-tree-main)" />
                           </button>
-                        </>
-                      )}
+                        )}
+                      </>
+                    )}
                     </div>
                   </td>
                 </tr>
@@ -1837,9 +1981,10 @@ function RegionPicker({ form, onRegionSelect }) {
   );
 }
 
-function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onChange, onRegionSelect, onSubmit, onClose }) {
+function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onChange, onSegmentChange, onAddSegment, onRegionSelect, onSubmit, onClose }) {
   const isCamera = type === "camera";
-  const title = `${mode === "create" ? "新增" : "编辑"}${isCamera ? "摄像机" : "服务器"}`;
+  const isStream = type === "stream";
+  const title = `${mode === "create" ? "新增" : "编辑"}${isCamera ? "摄像机" : isStream ? "流链路" : "服务器"}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[var(--layout-content-padding)]" onClick={onClose}>
@@ -1865,11 +2010,67 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
           )}
 
           <div className="grid grid-cols-4 gap-[var(--layout-content-gap)]">
-            <Field label="ID" name="id" value={form.id} onChange={onChange} required disabled={mode === "edit"} />
-            <div className="col-span-2">
-              <Field label="名称" name="name" value={form.name} onChange={onChange} required />
-            </div>
-            <Field label="IP" name="ip" value={form.ip} onChange={onChange} required />
+            {isStream ? (
+              <>
+                <Field label="流链路ID" name="id" value={form.id} onChange={onChange} required disabled />
+                <Field label="展示设备ID" name="display_id" value={form.display_id} onChange={onChange} disabled />
+                <Field label="摄像机ID" name="camera_id" value={form.camera_id} onChange={onChange} />
+                <Field label="服务器ID" name="server_id" value={form.server_id} onChange={onChange} options={[{ label: "未绑定", value: "" }, ...servers.map((server) => ({ label: `${server.name} (${server.id})`, value: server.id }))]} />
+                <Field label="摄像机IP" name="source_ip" value={form.source_ip} onChange={onChange} />
+                <Field label="摄像机端口" name="source_port" value={form.source_port} onChange={onChange} type="number" />
+                <Field label="服务器IP" name="destination_ip" value={form.destination_ip} onChange={onChange} />
+                <Field label="服务器端口" name="destination_port" value={form.destination_port} onChange={onChange} type="number" />
+                <Field label="SSRC" name="ssrc" value={form.ssrc} onChange={onChange} />
+                <Field label="传输协议" name="transport_protocol" value={form.transport_protocol} onChange={onChange} options={[{ label: "UDP", value: "UDP" }, { label: "TCP", value: "TCP" }, { label: "RTP", value: "RTP" }, { label: "RTSP", value: "RTSP" }]} />
+                <Field label="连接状态" name="is_connected" value={form.is_connected} onChange={onChange} options={[{ label: "连通", value: "true" }, { label: "断开", value: "false" }]} />
+                <Field label="异常状态" name="is_fault" value={form.is_fault} onChange={onChange} options={[{ label: "正常", value: "false" }, { label: "异常", value: "true" }]} />
+                <Field label="链路类型" name="link_type" value={form.link_type} onChange={onChange} />
+                <Field label="码流类型" name="stream_type" value={form.stream_type} onChange={onChange} />
+                <Field label="编码格式" name="codec" value={form.codec} onChange={onChange} />
+                <Field label="分辨率" name="resolution" value={form.resolution} onChange={onChange} />
+
+                <div className="col-span-4 mt-[var(--layout-content-gap)] rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-gap)]">
+                  <div className="mb-[var(--layout-search-gap)] text-ui-medium font-semibold text-[var(--color-text-main)]">上下行链路段</div>
+                  {form.segments?.length ? (
+                    <div className="grid gap-[var(--layout-content-gap)]">
+                      {form.segments.map((segment, index) => (
+                        <div key={segment.id ?? index} className="grid grid-cols-4 gap-[var(--layout-content-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-gap)]">
+                          <div className="col-span-4 text-ui-small font-semibold text-[var(--color-text-main)]">
+                            {segmentDirectionText(segment.direction)}链路段 {index + 1}
+                          </div>
+                          <Field label="方向" name={`segment-${index}-direction`} value={segment.direction} onChange={(event) => onSegmentChange(index, "direction", event.target.value)} options={[{ label: "上行", value: "uplink" }, { label: "下行", value: "downlink" }]} />
+                          <Field label="源IP" name={`segment-${index}-source_ip`} value={segment.source_ip} onChange={(event) => onSegmentChange(index, "source_ip", event.target.value)} />
+                          <Field label="源端口" name={`segment-${index}-source_port`} value={segment.source_port} onChange={(event) => onSegmentChange(index, "source_port", event.target.value)} type="number" />
+                          <Field label="目的IP" name={`segment-${index}-destination_ip`} value={segment.destination_ip} onChange={(event) => onSegmentChange(index, "destination_ip", event.target.value)} />
+                          <Field label="目的端口" name={`segment-${index}-destination_port`} value={segment.destination_port} onChange={(event) => onSegmentChange(index, "destination_port", event.target.value)} type="number" />
+                          <Field label="SSRC" name={`segment-${index}-ssrc`} value={segment.ssrc} onChange={(event) => onSegmentChange(index, "ssrc", event.target.value)} />
+                          <Field label="状态" name={`segment-${index}-status`} value={segment.status} onChange={(event) => onSegmentChange(index, "status", event.target.value)} options={[{ label: "在线", value: "online" }, { label: "离线", value: "offline" }, { label: "配置缺失", value: "config_missing" }]} />
+                          <Field label="异常" name={`segment-${index}-is_fault`} value={String(Boolean(segment.is_fault))} onChange={(event) => onSegmentChange(index, "is_fault", event.target.value)} options={[{ label: "正常", value: "false" }, { label: "异常", value: "true" }]} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[var(--layout-radius-sm)] border border-dashed border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">
+                      当前流链路没有上下行段记录，只会保存主链路字段。
+                    </div>
+                  )}
+                  <div className="mt-[var(--layout-content-gap)] flex justify-end gap-[var(--layout-search-gap)]">
+                    <button type="button" onClick={() => onAddSegment("uplink")} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+                      新增上行段
+                    </button>
+                    <button type="button" onClick={() => onAddSegment("downlink")} className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+                      新增下行段
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <Field label="ID" name="id" value={form.id} onChange={onChange} required disabled={mode === "edit"} />
+                <div className="col-span-2">
+                  <Field label="名称" name="name" value={form.name} onChange={onChange} required />
+                </div>
+                <Field label="IP" name="ip" value={form.ip} onChange={onChange} required />
 
             {isCamera ? (
               <>
@@ -1905,6 +2106,9 @@ function DeviceFormModal({ type, mode, form, error, servers, selectedRegion, onC
                 <Field label="磁盘使用率" name="disk_usage" value={form.disk_usage} onChange={onChange} type="number" />
                 <Field label="带宽使用率" name="net_bandwidth" value={form.net_bandwidth} onChange={onChange} type="number" />
                 <Field label="GPU 使用率" name="gpu_usage" value={form.gpu_usage} onChange={onChange} type="number" />
+                <RegionPicker form={form} onRegionSelect={onRegionSelect} />
+              </>
+            )}
               </>
             )}
           </div>
@@ -1970,11 +2174,11 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   );
 
   const focusedServers = useMemo(() => {
-    if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
+    if (cameraId || focusTarget?.nodeType === "custom_folder") {
       return servers.filter((server) => focusedServerIds.has(server.id));
     }
     return servers;
-  }, [servers, focusedServerIds, cameraId, regionCode, focusTarget?.nodeType]);
+  }, [servers, focusedServerIds, cameraId, focusTarget?.nodeType]);
 
   const focusedCameraIds = useMemo(
     () => new Set(focusedCameras.map((camera) => camera.id)),
@@ -1982,7 +2186,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   );
 
   const focusedStreams = useMemo(() => {
-    if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
+    if (cameraId || focusTarget?.nodeType === "custom_folder") {
       return streams.filter((stream) => focusedCameraIds.has(stream.camera_id));
     }
     return streams;
@@ -2001,12 +2205,17 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     [focusedStreams, keyword, deviceStatusFilter]
   );
 
-  // 拆分1：只加载不需要跟随行政区变动的数据（服务器、流链路）
+  const scopedDataParams = useMemo(() => {
+    if (cameraId) return { camera_id: cameraId };
+    if (regionCode) return { region_code: regionCode };
+    return {};
+  }, [cameraId, regionCode]);
+
   const loadCommonData = async () => {
     try {
       const [serverRows, streamRows, activeFlowPayload] = await Promise.all([
-        getDeviceServers(),
-        getDeviceStreams(),
+        getDeviceServers(regionCode ? { region_code: regionCode } : {}),
+        getDeviceStreams(scopedDataParams),
         getAlgorithmActiveFlows(),
       ]);
       setServers(serverRows);
@@ -2036,7 +2245,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
 
   // 手动刷新按钮逻辑
   const handleRefresh = async () => {
-    loadCommonData();
+    await loadCommonData();
     await loadCameraData();
   };
 
@@ -2080,10 +2289,10 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     }
   };
 
-  // 仅在组件初次挂载时加载一次服务器和流链路
   useEffect(() => {
     loadCommonData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regionCode, cameraId]);
 
   // 当左侧树切换 regionCode 时，仅重新拉取该区域的摄像机
   useEffect(() => {
@@ -2184,9 +2393,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const metricCameraValue = scopeMetrics
     ? formatStatusMetricValue(scopeMetrics.device_status?.cameras, "台")
     : `${focusedCameras.filter((item) => item.status !== "offline").length}/${focusedCameras.length} 台`;
-  const metricServerValue = scopeMetrics
-    ? formatStatusMetricValue(scopeMetrics.device_status?.servers, "台", "normal")
-    : `${focusedServers.filter((item) => item.status === "normal").length}/${focusedServers.length} 台`;
+  const metricServerValue = `${focusedServers.filter((item) => normalizeOperationalStatus(item.status) === "normal").length}/${focusedServers.length} 台`;
   const metricStreamValue = scopeMetrics
     ? formatStatusMetricValue(scopeMetrics.device_status?.streams, "条")
     : `${focusedStreams.filter((item) => item.is_connected).length}/${focusedStreams.length} 条`;
@@ -2218,7 +2425,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
                 ? { town_code: focusTarget.regionCode, town_name: focusTarget.name }
                 : {}),
             }
-          : serverInitialForm,
+          : {
+              ...serverInitialForm,
+              ...(focusTarget?.nodeType === "region" && focusTarget.level === "town"
+                ? { town_code: focusTarget.regionCode, town_name: focusTarget.name }
+                : {}),
+            },
     });
   };
 
@@ -2227,7 +2439,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       type,
       mode: "edit",
       error: "",
-      form: type === "camera" ? normalizeCameraForm(item) : normalizeServerForm(item),
+      form: type === "camera" ? normalizeCameraForm(item) : type === "stream" ? normalizeStreamForm(item) : normalizeServerForm(item),
     });
   };
 
@@ -2250,6 +2462,43 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       form: {
         ...prev.form,
         ...regionPatch,
+      },
+    }));
+  };
+
+  const handleStreamSegmentChange = (index, key, value) => {
+    setFormState((prev) => ({
+      ...prev,
+      error: "",
+      form: {
+        ...prev.form,
+        segments: (prev.form.segments || []).map((segment, segmentIndex) =>
+          segmentIndex === index ? { ...segment, [key]: value } : segment
+        ),
+      },
+    }));
+  };
+
+  const handleAddStreamSegment = (direction) => {
+    setFormState((prev) => ({
+      ...prev,
+      error: "",
+      form: {
+        ...prev.form,
+        segments: [
+          ...(prev.form.segments || []),
+          {
+            id: null,
+            direction,
+            source_ip: direction === "uplink" ? prev.form.source_ip : prev.form.destination_ip,
+            source_port: direction === "uplink" ? prev.form.source_port : prev.form.destination_port,
+            destination_ip: direction === "uplink" ? prev.form.destination_ip : "",
+            destination_port: direction === "uplink" ? prev.form.destination_port : "",
+            ssrc: direction === "uplink" ? prev.form.ssrc : "",
+            status: prev.form.is_connected === "true" ? "online" : "offline",
+            is_fault: false,
+          },
+        ],
       },
     }));
   };
@@ -2295,13 +2544,17 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
           const { id, ...updatePayload } = payload;
           await updateDeviceCamera(formState.form.id, updatePayload);
         }
-      } else {
+      } else if (formState.type === "server") {
         const serverRequiredError = validateRequiredFields(formState.form, [
           { key: "id", label: "服务器ID" },
           { key: "name", label: "服务器名称" },
           { key: "ip", label: "服务器IP" },
           { key: "status", label: "状态" },
           { key: "node_type", label: "节点类型" },
+          { key: "province_code", label: "服务器所属省级行政区" },
+          { key: "city_code", label: "服务器所属地级行政区" },
+          { key: "county_code", label: "服务器所属县级行政区" },
+          { key: "town_code", label: "服务器所属乡镇/街道" },
         ]);
 
         if (serverRequiredError) {
@@ -2319,6 +2572,27 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
           const { id, ...updatePayload } = payload;
           await updateDeviceServer(formState.form.id, updatePayload);
         }
+      } else if (formState.type === "stream") {
+        const streamRequiredError = validateRequiredFields(formState.form, [
+          { key: "id", label: "流链路ID" },
+        ]);
+
+        if (streamRequiredError) {
+          setFormState((prev) => ({
+            ...prev,
+            error: streamRequiredError,
+          }));
+          return;
+        }
+
+        await updateDeviceStream(formState.form.id, buildStreamPayload(formState.form));
+        await Promise.all(
+          (formState.form.segments || []).map((segment) =>
+            segment.id
+              ? updateStreamSegment(segment.id, buildStreamSegmentPayload(segment))
+              : createStreamSegment(buildStreamSegmentCreatePayload(formState.form.id, segment))
+          )
+        );
       }
 
       setFormState(null);
@@ -2384,6 +2658,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       className: "min-w-[8rem]",
       render: (row) => <span className={`rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${statusClass(row.status)}`}>{serverStatusText(row.status)}</span>,
     },
+    { key: "town_name", label: "所属乡镇", className: "min-w-[12rem]" },
     { key: "location_desc", label: "位置", className: "min-w-[20rem]" },
   ];
 
@@ -2509,12 +2784,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
         ) : activeTab === "server" ? (
           <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
         ) : (
-          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly renderExpanded={(item) => <StreamSegmentTable stream={item} />} selection={{ selectedIds: selectedChainlistStreamIds, onToggle: toggleChainlistStream, isDisabled: (row) => !row.is_connected }} />
+          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} onEdit={(item) => handleOpenEdit("stream", item)} readonly={readonlyMode} renderExpanded={(item) => <StreamSegmentTable stream={item} />} selection={{ selectedIds: selectedChainlistStreamIds, onToggle: toggleChainlistStream, isDisabled: (row) => !row.is_connected }} />
         )}
       </section>
 
       {formState && (
-        <DeviceFormModal type={formState.type} mode={formState.mode} form={formState.form} error={formState.error} servers={servers} selectedRegion={focusTarget} onChange={handleFormChange} onRegionSelect={handleRegionSelect} onSubmit={handleSubmitForm} onClose={() => setFormState(null)} />
+        <DeviceFormModal type={formState.type} mode={formState.mode} form={formState.form} error={formState.error} servers={servers} selectedRegion={focusTarget} onChange={handleFormChange} onSegmentChange={handleStreamSegmentChange} onAddSegment={handleAddStreamSegment} onRegionSelect={handleRegionSelect} onSubmit={handleSubmitForm} onClose={() => setFormState(null)} />
       )}
     </main>
   );

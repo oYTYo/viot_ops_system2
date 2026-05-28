@@ -16,7 +16,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import case, or_
+from sqlalchemy import case, inspect, or_, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -70,9 +70,11 @@ def create_runtime_tables() -> None:
     models.DeviceGroup.__table__.create(bind=engine, checkfirst=True)
     models.group_camera_link.create(bind=engine, checkfirst=True)
     models.StreamMediaSegment.__table__.create(bind=engine, checkfirst=True)
+    _ensure_server_region_columns()
     _ensure_runtime_profile_file()
     _ensure_active_flow_cache_file()
     _normalize_existing_camera_protocols()
+    _backfill_server_regions()
     _ensure_huli_alarm_demo_cameras()
     _ensure_huli_fake_camera_fleet()
 
@@ -168,6 +170,16 @@ def _segment_key(direction: str, source_ip: str, source_port: int | None, destin
     ])
 
 
+def _normalize_flow_device_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.match(r"^(\d{16,32}(?:_\d+)?)(?:_\d{10,}_[A-Za-z0-9]+)$", text)
+    if match:
+        return match.group(1)
+    return text
+
+
 def _normalize_flow_endpoint(data: Any) -> dict[str, str | None]:
     if not isinstance(data, dict):
         return {
@@ -210,8 +222,16 @@ def _normalize_raw_active_flows(payload: Any) -> list[dict[str, Any]]:
         return flows
 
     source_payload = {"default": payload} if "uplink" in payload or "downlink" in payload else payload
-    for device_id, value in source_payload.items():
+    for raw_device_id, value in source_payload.items():
         if not isinstance(value, dict):
+            continue
+        device_id = _normalize_flow_device_id(
+            value.get("device_id")
+            or value.get("camera_id")
+            or value.get("gb_id")
+            or raw_device_id
+        )
+        if not device_id:
             continue
         uplink = _normalize_flow_endpoint(value.get("uplink") or {})
         downlinks = [
@@ -223,7 +243,8 @@ def _normalize_raw_active_flows(payload: Any) -> list[dict[str, Any]]:
         flows.append(
             {
                 "device_id": str(device_id),
-                "camera_name": str(device_id),
+                "source_device_id": str(raw_device_id),
+                "camera_name": str(value.get("camera_name") or value.get("name") or device_id),
                 "camera_ip": uplink.get("ip_src"),
                 "server_ip": uplink.get("ip_dst") or (downlinks[0].get("ip_src") if downlinks else None),
                 "uplink": uplink,
@@ -1271,6 +1292,80 @@ def _normalize_existing_camera_protocols() -> None:
         db.close()
 
 
+SERVER_REGION_COLUMNS = {
+    "province_code": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "province_name": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "city_code": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "city_name": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "county_code": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "county_name": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "town_code": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "town_name": "VARCHAR(64) NOT NULL DEFAULT ''",
+}
+
+
+def _ensure_server_region_columns() -> None:
+    inspector = inspect(engine)
+    existing_columns = {column["name"] for column in inspector.get_columns("server")}
+    with engine.begin() as connection:
+        for column_name, column_sql in SERVER_REGION_COLUMNS.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE server ADD COLUMN {column_name} {column_sql}"))
+        for index_name, column_name in [
+            ("ix_server_province_code", "province_code"),
+            ("ix_server_city_code", "city_code"),
+            ("ix_server_county_code", "county_code"),
+            ("ix_server_town_code", "town_code"),
+        ]:
+            if not _mysql_index_exists(connection, "server", index_name):
+                connection.execute(text(f"CREATE INDEX {index_name} ON server ({column_name})"))
+
+
+def _mysql_index_exists(connection, table_name: str, index_name: str) -> bool:
+    result = connection.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = :table_name
+              AND index_name = :index_name
+            LIMIT 1
+            """
+        ),
+        {"table_name": table_name, "index_name": index_name},
+    )
+    return result.first() is not None
+
+
+def _backfill_server_regions() -> None:
+    db = SessionLocal()
+    try:
+        province = db.get(models.AdministrativeRegion, "350000")
+        city = db.get(models.AdministrativeRegion, "350200")
+        county = db.get(models.AdministrativeRegion, "350206")
+        town = db.get(models.AdministrativeRegion, "350206-default")
+        if not province or not city or not county or not town:
+            return
+        updated = False
+        for server in db.query(models.Server).filter(models.Server.province_code == "").all():
+            server.province_code = province.region_code
+            server.province_name = province.region_name
+            server.city_code = city.region_code
+            server.city_name = city.region_name
+            server.county_code = county.region_code
+            server.county_name = county.region_name
+            server.town_code = town.region_code
+            server.town_name = town.region_name
+            updated = True
+        if updated:
+            db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+    finally:
+        db.close()
+
+
 def _collect_region_descendant_codes(db: Session, region_code: str) -> list[str]:
     _get_region_or_404(db, region_code)
 
@@ -1289,6 +1384,21 @@ def _collect_region_descendant_codes(db: Session, region_code: str) -> list[str]
 
     dfs(region_code)
     return result
+
+
+def _apply_region_filter(query, model, db: Session, region_code: str | None):
+    if not region_code:
+        return query
+    region = db.get(models.AdministrativeRegion, region_code)
+    if not region:
+        return query.filter(False)
+    if region.level == "province":
+        return query.filter(model.province_code == region_code)
+    if region.level == "city":
+        return query.filter(model.city_code == region_code)
+    if region.level == "county":
+        return query.filter(model.county_code == region_code)
+    return query.filter(model.town_code == region_code)
 
 
 def _is_camera_online(camera: models.Camera) -> bool:
@@ -2089,7 +2199,22 @@ def create_server(payload: schemas.ServerCreate, db: Session = Depends(get_db)):
     if db.get(models.Server, payload.id):
         raise HTTPException(status_code=409, detail=f"server '{payload.id}' already exists")
 
-    obj = models.Server(**payload.model_dump())
+    create_data = payload.model_dump()
+    if create_data.get("province_code") or create_data.get("city_code") or create_data.get("county_code") or create_data.get("town_code"):
+        province, city, county, town = _ensure_camera_admin_chain(
+            db,
+            create_data.get("province_code") or "",
+            create_data.get("city_code") or "",
+            create_data.get("county_code") or "",
+            create_data.get("town_code") or "",
+        )
+        create_data["province_code"] = province.region_code
+        create_data["city_code"] = city.region_code
+        create_data["county_code"] = county.region_code
+        create_data["town_code"] = town.region_code
+        _normalize_camera_region_names(create_data, province, city, county, town)
+
+    obj = models.Server(**create_data)
     db.add(obj)
     _commit_or_rollback(db, "failed to create server: constraint violation")
     db.refresh(obj)
@@ -2100,11 +2225,13 @@ def create_server(payload: schemas.ServerCreate, db: Session = Depends(get_db)):
 def list_servers(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
+    region_code: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
     node_type: str | None = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Server)
+    query = _apply_region_filter(query, models.Server, db, region_code)
 
     if status_filter:
         query = query.filter(models.Server.status == status_filter)
@@ -2130,6 +2257,38 @@ def update_server(server_id: str, payload: schemas.ServerUpdate, db: Session = D
         raise HTTPException(status_code=404, detail="server not found")
 
     update_data = payload.model_dump(exclude_unset=True)
+
+    region_keys = {
+        "province_code",
+        "city_code",
+        "county_code",
+        "town_code",
+        "province_name",
+        "city_name",
+        "county_name",
+        "town_name",
+    }
+
+    if region_keys.intersection(update_data.keys()):
+        province_code = update_data.get("province_code", obj.province_code)
+        city_code = update_data.get("city_code", obj.city_code)
+        county_code = update_data.get("county_code", obj.county_code)
+        town_code = update_data.get("town_code", obj.town_code)
+
+        province, city, county, town = _ensure_camera_admin_chain(
+            db,
+            province_code,
+            city_code,
+            county_code,
+            town_code,
+        )
+
+        update_data["province_code"] = province.region_code
+        update_data["city_code"] = city.region_code
+        update_data["county_code"] = county.region_code
+        update_data["town_code"] = town.region_code
+        _normalize_camera_region_names(update_data, province, city, county, town)
+
     _apply_update(obj, update_data)
 
     db.add(obj)
@@ -2275,18 +2434,7 @@ def list_cameras(
 ):
     query = db.query(models.Camera)
 
-    if region_code:
-        # 【优化】不再把整个行政区表拉到内存去查 descendant，直接通过对应层级过滤
-        region = db.get(models.AdministrativeRegion, region_code)
-        if region:
-            if region.level == "province":
-                query = query.filter(models.Camera.province_code == region_code)
-            elif region.level == "city":
-                query = query.filter(models.Camera.city_code == region_code)
-            elif region.level == "county":
-                query = query.filter(models.Camera.county_code == region_code)
-            else:
-                query = query.filter(models.Camera.town_code == region_code)
+    query = _apply_region_filter(query, models.Camera, db, region_code)
 
     if status_filter:
         query = query.filter(models.Camera.status == status_filter)
@@ -2478,6 +2626,7 @@ def create_stream_media(payload: schemas.StreamMediaCreate, db: Session = Depend
 def list_stream_medias(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=5000),
+    region_code: str | None = None,
     camera_id: str | None = None,
     server_id: str | None = None,
     is_fault: bool | None = None,
@@ -2487,11 +2636,16 @@ def list_stream_medias(
 ):
     query = db.query(models.StreamMedia)
 
-    if not include_fake:
+    if region_code or not include_fake:
         query = (
             query.join(models.Camera, models.StreamMedia.camera_id == models.Camera.id)
-            .filter(~models.Camera.id.like("F%"), ~models.Camera.id.like("Z%"))
         )
+
+    if region_code:
+        query = _apply_region_filter(query, models.Camera, db, region_code)
+
+    if not include_fake:
+        query = query.filter(~models.Camera.id.like("F%"), ~models.Camera.id.like("Z%"))
 
     if camera_id:
         query = query.filter(models.StreamMedia.camera_id == camera_id)

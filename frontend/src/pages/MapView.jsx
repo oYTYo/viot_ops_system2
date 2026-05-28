@@ -694,6 +694,11 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
 
     if (hasLngLat(targetCamera)) {
       focusedCameraIdRef.current = getCameraId(targetCamera) || cameraId;
+      setPreviewCamera({
+        ...targetCamera,
+        cameraId: focusedCameraIdRef.current,
+        regionCode: getCameraRegionCode(targetCamera),
+      });
       cachedMapViewState = {
         mode: "cameras",
         regionCode: getCameraRegionCode(targetCamera),
@@ -829,7 +834,7 @@ export default function MapView({ focusTarget, darkMode, onOpenCameraDetail, onO
     <main className="grid min-w-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-[var(--layout-content-gap)] bg-[var(--color-page-bg)] p-[var(--layout-content-padding)] transition-colors">
       <section className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
         <div ref={mapContainerRef} className="h-full w-full" />
-        {previewCamera && <MapCameraPreview camera={previewCamera} onClose={() => setPreviewCamera(null)} onDetail={onOpenCameraDetail} onDiagnose={onOpenCameraDiagnosis} />}
+        {previewCamera && <MapCameraPreview key={getCameraId(previewCamera)} camera={previewCamera} onClose={() => setPreviewCamera(null)} onDetail={onOpenCameraDetail} onDiagnose={onOpenCameraDiagnosis} />}
 
         <div className="pointer-events-none absolute left-[var(--layout-content-padding)] top-[var(--layout-content-padding)] flex items-center gap-[var(--layout-search-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-main)] shadow-[var(--shadow-panel)]">
           <RadioTower size="var(--icon-bottom)" className="text-[var(--color-accent)]" />

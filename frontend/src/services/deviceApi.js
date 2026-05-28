@@ -68,3 +68,18 @@ export async function getDeviceStreams(params = {}) {
   });
   return res.data;
 }
+
+export async function createStreamSegment(payload) {
+  const res = await request.post("/stream-media-segments", payload);
+  return res.data;
+}
+
+export async function updateDeviceStream(streamId, payload) {
+  const res = await request.put(`/stream-medias/${encodeURIComponent(streamId)}`, payload);
+  return res.data;
+}
+
+export async function updateStreamSegment(segmentId, payload) {
+  const res = await request.put(`/stream-media-segments/${encodeURIComponent(segmentId)}`, payload);
+  return res.data;
+}
