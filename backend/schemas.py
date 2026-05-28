@@ -786,6 +786,18 @@ class AlgorithmActiveFlowResponse(BaseModel):
     flows: list[AlgorithmActiveFlowItem]
 
 
+class ChainlistApplyRequest(BaseModel):
+    stream_ids: list[str] = Field(default_factory=list, max_length=5)
+
+
+class ChainlistApplyResponse(BaseModel):
+    chainlist_file: str
+    selected_stream_ids: list[str]
+    written_count: int
+    skipped_stream_ids: list[str] = Field(default_factory=list)
+    max_count: int = 5
+
+
 class AlgorithmAnomalyRead(BaseModel):
     id: str
     timestamp: datetime | None = None

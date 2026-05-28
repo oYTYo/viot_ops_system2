@@ -20,6 +20,11 @@ export async function refreshAlgorithmActiveFlows() {
   return res.data;
 }
 
+export async function applyAlgorithmChainlist(payload) {
+  const res = await request.post("/algorithm/chainlist/apply", payload);
+  return res.data;
+}
+
 export async function getLatestAlgorithmAnomalies(params = {}) {
   const res = await request.get("/algorithm/anomalies/latest", {
     params: {

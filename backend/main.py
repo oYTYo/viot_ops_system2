@@ -36,16 +36,7 @@ RUNTIME_PROFILE_FILE = Path(os.getenv("VIOT_RUNTIME_PROFILE_FILE", str(BASE_DIR 
 ACTIVE_FLOW_CACHE_FILE = Path(os.getenv("VIOT_ACTIVE_FLOW_CACHE_FILE", str(BASE_DIR / "active_flows_cache.json")))
 CHAINLIST_FILE = Path(os.getenv("VIOT_CHAINLIST_FILE", "/home/monitor_realtime/chainlist.json"))
 MATCH_SCRIPT_PATH = Path(os.getenv("VIOT_MATCH_SCRIPT_PATH", "/home/monitor_realtime/network/match_uplink_downlink_flows.py"))
-DEFAULT_MATCH_OUTPUT_FILE = BASE_DIR / "active_flows_match.json"
-NETWORK_MATCH_FALLBACK_FILES = [
-    Path(path.strip())
-    for path in os.getenv(
-        "VIOT_NETWORK_MATCH_FALLBACK_FILES",
-        "/home/monitor_realtime/network/uplink_downlink_match.json,"
-        "/home/monitor_realtime/network/uplink_downlink_match copy.json",
-    ).split(",")
-    if path.strip()
-]
+MATCH_OUTPUT_FILE = Path(os.getenv("VIOT_MATCH_OUTPUT_FILE", "/home/monitor_realtime/network/uplink_downlink_match.json"))
 ANOMALY_LOG_FILE = Path(os.getenv("VIOT_ANOMALY_LOG_FILE", "/home/monitor_realtime/output/anomaly_log.jsonl"))
 MAX_COLLECTABLE_FLOWS = int(os.getenv("VIOT_MAX_COLLECTABLE_FLOWS", "5"))
 STREAM_MEDIA_SERVER_IP = os.getenv("VIOT_STREAM_MEDIA_SERVER_IP", "10.193.12.10")
@@ -262,6 +253,56 @@ def _hash_stream_id(*parts: Any) -> str:
     return f"match-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
 
 
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _first_present(*values: Any) -> str:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _has_text(value: Any) -> bool:
+    return bool(_clean_text(value))
+
+
+def _merge_non_empty(existing: Any, incoming: Any) -> Any:
+    return incoming if _has_text(incoming) and not _has_text(existing) else existing
+
+
+def _complete_uplink_segment(segment: models.StreamMediaSegment | None) -> bool:
+    return bool(
+        segment
+        and segment.direction == "uplink"
+        and _has_text(segment.source_ip)
+        and _has_text(segment.destination_ip)
+        and segment.source_port is not None
+        and segment.destination_port is not None
+        and _has_text(segment.ssrc)
+    )
+
+
+def _complete_downlink_segment(segment: models.StreamMediaSegment | None) -> bool:
+    return bool(
+        segment
+        and segment.direction == "downlink"
+        and _has_text(segment.source_ip)
+        and _has_text(segment.destination_ip)
+        and segment.source_port is not None
+        and segment.destination_port is not None
+    )
+
+
+def _stream_has_complete_chain(stream: models.StreamMedia) -> bool:
+    segments = list(stream.segments or [])
+    return any(_complete_uplink_segment(item) for item in segments) and any(_complete_downlink_segment(item) for item in segments)
+
+
 def _default_camera_region(db: Session) -> dict[str, str]:
     camera = db.query(models.Camera).first()
     if camera:
@@ -307,7 +348,7 @@ def _ensure_stream_camera(db: Session, flow: dict[str, Any], server_id: str, now
         camera = models.Camera(
             id=device_id,
             name=str(flow.get("camera_name") or device_id),
-            ip=camera_ip or "0.0.0.0",
+            ip=camera_ip or "",
             status="online",
             protocol="RTP",
             stream_type="main",
@@ -347,18 +388,21 @@ def _ensure_stream_media_server(db: Session) -> str:
 
 
 def _upsert_flow_segment(db: Session, stream_media_id: str, direction: str, endpoint: dict[str, Any], ssrc: str | None, now: datetime) -> str | None:
-    source_ip = endpoint.get("ip_src") or ""
-    destination_ip = endpoint.get("ip_dst") or ""
+    source_ip = _clean_text(endpoint.get("ip_src"))
+    destination_ip = _clean_text(endpoint.get("ip_dst"))
     if not source_ip and not destination_ip:
         return None
 
+    source_port = _int_or_none(endpoint.get("port_src"))
+    destination_port = _int_or_none(endpoint.get("port_dst"))
+    segment_ssrc = _first_present(ssrc, endpoint.get("ssrc"), endpoint.get("ssrc_hex"))
     key = _segment_key(
         direction,
         source_ip,
-        _int_or_none(endpoint.get("port_src")),
+        source_port,
         destination_ip,
-        _int_or_none(endpoint.get("port_dst")),
-        ssrc or endpoint.get("ssrc") or endpoint.get("ssrc_hex"),
+        destination_port,
+        segment_ssrc,
     )
     segment = db.query(models.StreamMediaSegment).filter(models.StreamMediaSegment.segment_key == key).first()
     payload = {
@@ -366,16 +410,20 @@ def _upsert_flow_segment(db: Session, stream_media_id: str, direction: str, endp
         "segment_key": key,
         "direction": direction,
         "source_ip": source_ip,
-        "source_port": _int_or_none(endpoint.get("port_src")),
+        "source_port": source_port,
         "destination_ip": destination_ip,
-        "destination_port": _int_or_none(endpoint.get("port_dst")),
-        "ssrc": ssrc or endpoint.get("ssrc") or endpoint.get("ssrc_hex"),
+        "destination_port": destination_port,
+        "ssrc": segment_ssrc or None,
         "status": "online" if source_ip and destination_ip else "config_missing",
         "is_fault": False,
         "last_seen_at": now,
     }
     if segment:
-        _apply_update(segment, payload)
+        for key_name, value in payload.items():
+            if key_name in {"status", "is_fault", "last_seen_at"}:
+                setattr(segment, key_name, value)
+            else:
+                setattr(segment, key_name, _merge_non_empty(getattr(segment, key_name), value))
     else:
         segment = models.StreamMediaSegment(**payload, first_seen_at=now)
     db.add(segment)
@@ -391,20 +439,20 @@ def _sync_active_flows_to_database(db: Session, flows: list[dict[str, Any]]) -> 
 
     for flow in flows:
         uplink = flow.get("uplink") or {}
-        source_ip = uplink.get("ip_src") or flow.get("camera_ip") or "0.0.0.0"
-        destination_ip = uplink.get("ip_dst")
-        ssrc = uplink.get("ssrc") or uplink.get("ssrc_hex")
-        if not destination_ip or not ssrc:
+        source_ip = _first_present(uplink.get("ip_src"), flow.get("camera_ip"))
+        destination_ip = _clean_text(uplink.get("ip_dst"))
+        ssrc = _first_present(uplink.get("ssrc"), uplink.get("ssrc_hex"))
+        if not destination_ip and not source_ip and not ssrc:
             continue
 
-        stream_id = _hash_stream_id(source_ip, destination_ip, ssrc)
+        stream_id = _hash_stream_id(flow.get("device_id"), source_ip, destination_ip, ssrc)
         stream = db.get(models.StreamMedia, stream_id)
         payload = {
             "source_ip": source_ip,
             "source_port": _int_or_none(uplink.get("port_src")) or 0,
             "destination_ip": destination_ip,
             "destination_port": _int_or_none(uplink.get("port_dst")) or 0,
-            "ssrc": str(ssrc),
+            "ssrc": str(ssrc or ""),
             "camera_id": _ensure_stream_camera(db, flow, server_id, now),
             "server_id": server_id,
             "transport_protocol": "RTP",
@@ -415,18 +463,22 @@ def _sync_active_flows_to_database(db: Session, flows: list[dict[str, Any]]) -> 
             "last_update_time": now,
         }
         if stream:
-            _apply_update(stream, payload)
+            for key_name, value in payload.items():
+                if key_name in {"is_connected", "is_fault", "last_update_time", "transport_protocol", "link_type", "stream_type", "server_id", "camera_id"}:
+                    setattr(stream, key_name, value)
+                else:
+                    setattr(stream, key_name, _merge_non_empty(getattr(stream, key_name), value))
         else:
             stream = models.StreamMedia(id=stream_id, **payload)
         db.add(stream)
         seen_stream_ids.add(stream_id)
         updated_streams += 1
 
-        segment_key = _upsert_flow_segment(db, stream_id, "uplink", uplink, str(ssrc), now)
+        segment_key = _upsert_flow_segment(db, stream_id, "uplink", uplink, str(ssrc or ""), now)
         if segment_key:
             seen_segment_keys.add(segment_key)
         for downlink in flow.get("downlink") or []:
-            segment_key = _upsert_flow_segment(db, stream_id, "downlink", downlink, str(ssrc), now)
+            segment_key = _upsert_flow_segment(db, stream_id, "downlink", downlink, None, now)
             if segment_key:
                 seen_segment_keys.add(segment_key)
 
@@ -482,27 +534,56 @@ def _build_chainlist_payload(flows: list[dict[str, Any]]) -> tuple[str, dict[str
     return "device_map", payload
 
 
-def _load_active_flow_cache() -> dict[str, Any]:
-    _ensure_active_flow_cache_file()
-    payload = _read_json_file(ACTIVE_FLOW_CACHE_FILE, {})
-    payload.setdefault("updated_at", None)
-    payload.setdefault("source_file", None)
-    payload.setdefault("raw_payload", {})
-    payload.setdefault("flows", [])
-    payload.setdefault("chainlist_format", "device_map")
+def _stream_to_chainlist_entry(stream: models.StreamMedia) -> dict[str, Any] | None:
+    segments = list(stream.segments or [])
+    uplink = next((item for item in segments if _complete_uplink_segment(item)), None)
+    downlinks = [item for item in segments if _complete_downlink_segment(item)]
+    if not uplink or not downlinks:
+        return None
+    entry = {
+        "uplink": {
+            "ip_src": uplink.source_ip,
+            "ip_dst": uplink.destination_ip,
+            "ssrc": uplink.ssrc,
+            "port_src": str(uplink.source_port),
+            "port_dst": str(uplink.destination_port),
+        },
+        "downlink": [
+            {
+                "ip_src": item.source_ip,
+                "ip_dst": item.destination_ip,
+                "port_src": str(item.source_port),
+                "port_dst": str(item.destination_port),
+            }
+            for item in downlinks
+        ],
+    }
+    if str(uplink.ssrc or "").isdigit():
+        entry["uplink"]["ssrc_hex"] = f"0x{int(uplink.ssrc):08x}"
+    return entry
 
-    if payload.get("flows"):
-        return payload
 
-    for path in [DEFAULT_MATCH_OUTPUT_FILE, *NETWORK_MATCH_FALLBACK_FILES, CHAINLIST_FILE]:
-        raw_payload = _read_json_file(path, {})
-        if isinstance(raw_payload, dict) and raw_payload:
-            payload["source_file"] = str(path)
-            payload["raw_payload"] = raw_payload
-            payload["flows"] = _normalize_raw_active_flows(raw_payload)
-            payload["chainlist_format"] = "device_map"
-            break
+def _build_chainlist_from_streams(streams: list[models.StreamMedia]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for stream in streams[:MAX_COLLECTABLE_FLOWS]:
+        entry = _stream_to_chainlist_entry(stream)
+        if not entry:
+            continue
+        key = stream.camera_id or stream.id
+        payload[str(key)] = entry
     return payload
+
+
+def _load_active_flow_cache() -> dict[str, Any]:
+    raw_payload = _read_json_file(MATCH_OUTPUT_FILE, {})
+    flows = _normalize_raw_active_flows(raw_payload) if isinstance(raw_payload, dict) else []
+    return {
+        "updated_at": datetime.fromtimestamp(MATCH_OUTPUT_FILE.stat().st_mtime).isoformat() + "Z" if MATCH_OUTPUT_FILE.exists() else None,
+        "source_file": str(MATCH_OUTPUT_FILE),
+        "raw_payload": raw_payload if isinstance(raw_payload, dict) else {},
+        "flows": flows,
+        "chainlist_format": "device_map",
+    }
 
 
 def _extract_ips(text: str) -> list[str]:
@@ -2554,13 +2635,12 @@ def refresh_algorithm_active_flows(db: Session = Depends(get_db)):
     if not MATCH_SCRIPT_PATH.exists():
         raise HTTPException(status_code=500, detail=f"match 脚本不存在：{MATCH_SCRIPT_PATH}")
 
-    output_file = Path(str(DEFAULT_MATCH_OUTPUT_FILE))
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    MATCH_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         str(MATCH_SCRIPT_PATH),
         "--output",
-        str(output_file),
+        str(MATCH_OUTPUT_FILE),
     ]
 
     try:
@@ -2577,28 +2657,52 @@ def refresh_algorithm_active_flows(db: Session = Depends(get_db)):
         stderr = (exc.stderr or exc.stdout or "").strip()
         raise HTTPException(status_code=500, detail=f"match 脚本执行失败：{stderr[:500]}") from exc
 
-    raw_payload = _read_json_file(output_file, {})
+    raw_payload = _read_json_file(MATCH_OUTPUT_FILE, {})
     if not isinstance(raw_payload, dict) or not raw_payload:
-        raise HTTPException(status_code=500, detail=f"match 脚本未输出有效 JSON：{output_file}")
+        raise HTTPException(status_code=500, detail=f"match 脚本未输出有效 JSON：{MATCH_OUTPUT_FILE}")
 
     flows = _normalize_raw_active_flows(raw_payload)
-    chainlist_format, chainlist_payload = _build_chainlist_payload(flows)
-    _write_json_file(CHAINLIST_FILE, chainlist_payload)
     sync_summary = _sync_active_flows_to_database(db, flows)
     _commit_or_rollback(db, "failed to sync active flows to database")
     _write_json_file(
         ACTIVE_FLOW_CACHE_FILE,
         {
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "source_file": str(output_file),
+            "source_file": str(MATCH_OUTPUT_FILE),
             "raw_payload": raw_payload,
             "flows": flows,
-            "chainlist_format": chainlist_format,
+            "chainlist_format": "device_map",
             "stdout": (result.stdout or "").strip(),
             "database_sync": sync_summary,
         },
     )
     return _build_active_flow_response_from_cache()
+
+
+@app.post("/algorithm/chainlist/apply", response_model=schemas.ChainlistApplyResponse)
+def apply_algorithm_chainlist(payload: schemas.ChainlistApplyRequest, db: Session = Depends(get_db)):
+    requested_ids = [item for item in dict.fromkeys(payload.stream_ids) if item][:MAX_COLLECTABLE_FLOWS]
+    query = db.query(models.StreamMedia).filter(models.StreamMedia.is_connected == True)  # noqa: E712
+    if requested_ids:
+        streams = query.filter(models.StreamMedia.id.in_(requested_ids)).order_by(models.StreamMedia.updated_at.desc()).all()
+        streams_by_id = {stream.id: stream for stream in streams}
+        selected_streams = [streams_by_id[item] for item in requested_ids if item in streams_by_id and _stream_has_complete_chain(streams_by_id[item])]
+        skipped = [item for item in requested_ids if item not in {stream.id for stream in selected_streams}]
+    else:
+        candidates = query.order_by(models.StreamMedia.updated_at.desc()).limit(500).all()
+        selected_streams = [stream for stream in candidates if _stream_has_complete_chain(stream)][:MAX_COLLECTABLE_FLOWS]
+        skipped = []
+
+    chainlist_payload = _build_chainlist_from_streams(selected_streams)
+    _write_json_file(CHAINLIST_FILE, chainlist_payload)
+    selected_ids = [stream.id for stream in selected_streams if str(stream.camera_id or stream.id) in chainlist_payload]
+    return schemas.ChainlistApplyResponse(
+        chainlist_file=str(CHAINLIST_FILE),
+        selected_stream_ids=selected_ids,
+        written_count=len(chainlist_payload),
+        skipped_stream_ids=skipped,
+        max_count=MAX_COLLECTABLE_FLOWS,
+    )
 
 
 @app.get("/algorithm/anomalies/latest", response_model=list[schemas.AlgorithmAnomalyRead])

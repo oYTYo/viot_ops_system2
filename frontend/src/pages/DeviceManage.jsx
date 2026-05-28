@@ -31,7 +31,7 @@ import { getRegionByCode, getRegions } from "../services/regionApi";
 import { getCameraPreview } from "../services/videoApi";
 import { getLatestVideoDiagnosis, runVideoDiagnosis } from "../services/diagnosisApi";
 import { getStatisticsOverview } from "../services/statisticsApi";
-import { getAlgorithmActiveFlows, refreshAlgorithmActiveFlows } from "../services/algorithmApi";
+import { applyAlgorithmChainlist, getAlgorithmActiveFlows, refreshAlgorithmActiveFlows } from "../services/algorithmApi";
 import LivePlayer from "../components/LivePlayer";
 
 const cameraInitialForm = {
@@ -95,6 +95,22 @@ function formatValue(value, fallback = "-") {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "boolean") return value ? "是" : "否";
   return String(value);
+}
+
+function formatStreamSsrc(value, fallback = "-") {
+  if (value === null || value === undefined || value === "") return fallback;
+  const text = String(value).trim();
+  if (!text) return fallback;
+  if (/^(ssrc-|fake-ssrc-|alarm-demo-ssrc-)/i.test(text)) return fallback;
+  return text;
+}
+
+function formatStreamSsrcHex(value, fallback = "-") {
+  const text = formatStreamSsrc(value, fallback);
+  if (text === fallback) return fallback;
+  if (/^0x/i.test(text)) return text.toLowerCase();
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? `0x${Math.trunc(parsed).toString(16)}` : text;
 }
 
 function cameraStatusText(status) {
@@ -377,10 +393,11 @@ function MetricCard({ icon: Icon, label, value }) {
   );
 }
 
-function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDiagnose, readonly = false, renderExpanded = null }) {
+function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDiagnose, readonly = false, renderExpanded = null, selection = null }) {
   const [expandedRows, setExpandedRows] = useState(() => new Set());
   const hasExpanded = typeof renderExpanded === "function";
-  const extraColumnCount = 1 + (onDiagnose ? 1 : 0) + (hasExpanded ? 1 : 0);
+  const hasSelection = Boolean(selection);
+  const extraColumnCount = 1 + (onDiagnose ? 1 : 0) + (hasExpanded ? 1 : 0) + (hasSelection ? 1 : 0);
 
   const toggleExpanded = (rowId) => {
     setExpandedRows((prev) => {
@@ -396,6 +413,9 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDia
       <table className="w-max min-w-full border-separate border-spacing-0 text-left text-ui-medium">
         <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
           <tr>
+            {hasSelection && (
+              <th className="w-[4.2rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold">采集</th>
+            )}
             {hasExpanded && (
               <th className="w-[4.2rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold">展开</th>
             )}
@@ -425,6 +445,11 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDia
             rows.map((row) => (
               <Fragment key={row.id}>
                 <tr className="text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)]">
+                  {hasSelection && (
+                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                      <input type="checkbox" checked={selection.selectedIds.has(row.id)} disabled={selection.isDisabled ? selection.isDisabled(row) : false} onChange={(event) => selection.onToggle(row, event.target.checked)} className="h-[1rem] w-[1rem] accent-[var(--color-accent)]" />
+                    </td>
+                  )}
                   {hasExpanded && (
                     <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
                       <button type="button" title={expandedRows.has(row.id) ? "收起链路详情" : "展开链路详情"} onClick={() => toggleExpanded(row.id)} className="grid rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
@@ -488,12 +513,6 @@ function StreamSegmentTable({ stream }) {
     const cleanPort = port === null || port === undefined || port === "" ? "" : String(port);
     return cleanPort ? `${cleanIp}:${cleanPort}` : cleanIp;
   };
-  const formatSsrcHex = (value) => {
-    if (value === null || value === undefined || value === "") return "-";
-    if (typeof value === "string" && /^0x/i.test(value)) return value.toLowerCase();
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? `0x${Math.trunc(parsed).toString(16)}` : String(value);
-  };
   const segmentLine = (segment) => `${endpointText(segment.source_ip, segment.source_port)} -> ${endpointText(segment.destination_ip, segment.destination_port)}`;
   const statusBadgeClass = (segment) => `inline-flex items-center rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${segment.is_fault ? statusClass("fault") : segment.status === "offline" ? statusClass("offline") : statusClass("normal")}`;
 
@@ -521,7 +540,7 @@ function StreamSegmentTable({ stream }) {
                 <span className="text-[var(--color-text-muted)]">-&gt;</span>
                 <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">{endpointText(uplink.destination_ip, uplink.destination_port)}</span>
                 <span className={statusBadgeClass(uplink)}>{segmentStatusText(uplink)}</span>
-                <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatSsrcHex(uplink.ssrc)}</span>
+                <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatStreamSsrcHex(uplink.ssrc)}</span>
               </div>
             </div>
           ) : (
@@ -547,7 +566,7 @@ function StreamSegmentTable({ stream }) {
                   </div>
                   <div className="mt-[var(--layout-search-gap)] flex flex-wrap items-center gap-[var(--layout-search-gap)] text-ui-small">
                     <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">{segmentLine(segment)}</span>
-                    <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatSsrcHex(segment.ssrc)}</span>
+                    <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatStreamSsrcHex(segment.ssrc)}</span>
                   </div>
                 </div>
               ))}
@@ -670,7 +689,6 @@ function CameraPreview({ camera, onDiagnose }) {
   const [previewError, setPreviewError] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [clockText, setClockText] = useState("");
   const [previewBox, setPreviewBox] = useState({ width: 0, height: 0 });
   const [videoRatio, setVideoRatio] = useState(16 / 9);
   const previewBoxRef = useRef(null);
@@ -742,17 +760,6 @@ function CameraPreview({ camera, onDiagnose }) {
     };
   }, []);
 
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const pad = (value) => String(value).padStart(2, "0");
-      setClockText(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
-    };
-    updateClock();
-    const timer = window.setInterval(updateClock, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const videoFrameStyle = useMemo(() => {
     const { width, height } = previewBox;
 
@@ -822,9 +829,6 @@ function CameraPreview({ camera, onDiagnose }) {
         ) : (
           <div className="flex h-full items-center justify-center text-ui-medium text-white/55">{canPreview ? "" : "离线摄像机不可预览"}</div>
         )}
-        <div className="absolute left-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] rounded-[var(--layout-radius-sm)] bg-black/60 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small font-semibold text-white">
-          {clockText}
-        </div>
         <button type="button" onClick={() => onDiagnose?.(camera)} className="absolute right-[var(--layout-content-gap)] top-[var(--layout-search-padding-y)] rounded-[var(--layout-radius-sm)] bg-black/60 px-[var(--layout-search-padding-x)] py-[var(--layout-segment-button-padding-y)] text-ui-small font-semibold text-[var(--color-accent)] transition hover:underline">
           根因诊断
         </button>
@@ -962,7 +966,7 @@ function StreamDetailContent({ item }) {
           <InfoLine label="源端口" value={item.source_port} mono />
           <InfoLine label="目的IP" value={item.destination_ip} mono />
           <InfoLine label="目的端口" value={item.destination_port} mono />
-          <InfoLine label="SSRC" value={item.ssrc} mono />
+          <InfoLine label="SSRC" value={formatStreamSsrc(item.ssrc)} mono />
         </div>
         <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] p-[var(--layout-content-gap)]">
           <div className="mb-[var(--layout-search-padding-y)] text-ui-medium font-semibold text-[var(--color-text-main)]">传输参数</div>
@@ -1631,7 +1635,7 @@ function DetailView({ detail, onClose, onDiagnose }) {
                   <Server size="var(--icon-bottom)" className="shrink-0 text-[var(--color-accent)]" />
                   <span className="truncate font-semibold">{formatValue(item.server_id)}</span>
                   <span className="shrink-0 text-[var(--color-text-muted)]">-</span>
-                  <span className="shrink-0 font-mono text-[var(--color-text-muted)]">SSRC: {formatValue(item.ssrc)}</span>
+                  <span className="shrink-0 font-mono text-[var(--color-text-muted)]">SSRC: {formatStreamSsrc(item.ssrc)}</span>
                   <span className="shrink-0 text-[var(--color-text-muted)]">-</span>
                   <span className={`shrink-0 rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] text-ui-small ${statusClass(item.is_connected && !item.is_fault ? "normal" : "fault")}`}>{item.is_connected && !item.is_fault ? "连通" : "异常"}</span>
                 </>
@@ -1930,6 +1934,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const [streams, setStreams] = useState([]);
   const [activeFlowRows, setActiveFlowRows] = useState([]);
   const [activeFlowMeta, setActiveFlowMeta] = useState(null);
+  const [selectedChainlistStreamIds, setSelectedChainlistStreamIds] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [diagnosisCamera, setDiagnosisCamera] = useState(null);
   const [diagnosisFromExternal, setDiagnosisFromExternal] = useState(false);
@@ -1976,19 +1981,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     [focusedCameras]
   );
 
-  const combinedStreams = useMemo(() => {
-    const activeRows = activeFlowRows.map(normalizeMatchFlowToStream);
-    const activeKeys = new Set(activeRows.map(buildStreamIdentity));
-    const databaseRows = streams.filter((stream) => !activeKeys.has(buildStreamIdentity(stream)));
-    return [...activeRows, ...databaseRows];
-  }, [activeFlowRows, streams]);
-
   const focusedStreams = useMemo(() => {
     if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
-      return combinedStreams.filter((stream) => focusedCameraIds.has(stream.camera_id));
+      return streams.filter((stream) => focusedCameraIds.has(stream.camera_id));
     }
-    return combinedStreams;
-  }, [combinedStreams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
+    return streams;
+  }, [streams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
 
   const shownCameras = useMemo(
     () => filterByKeyword(filterByStatus(focusedCameras, "camera", deviceStatusFilter), keyword, ["id", "name", "ip", "town_name", "server_id"]),
@@ -2048,9 +2046,37 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       const payload = await refreshAlgorithmActiveFlows();
       setActiveFlowRows(payload?.flows || []);
       setActiveFlowMeta(payload || null);
+      await loadCommonData();
     } catch (err) {
       console.error("Failed to refresh active flows:", err);
       setError(err.response?.data?.detail || err.message || "刷新流链路信息失败");
+    }
+  };
+
+
+  const toggleChainlistStream = (stream, checked) => {
+    setSelectedChainlistStreamIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        if (next.size >= 5 && !next.has(stream.id)) return next;
+        next.add(stream.id);
+      } else {
+        next.delete(stream.id);
+      }
+      return next;
+    });
+  };
+
+  const applySelectedChainlist = async () => {
+    setError("");
+    try {
+      const selectedIds = Array.from(selectedChainlistStreamIds);
+      const result = await applyAlgorithmChainlist({ stream_ids: selectedIds });
+      setSelectedChainlistStreamIds(new Set(result.selected_stream_ids || []));
+      setActiveFlowMeta((prev) => ({ ...(prev || {}), chainlist_file: result.chainlist_file }));
+    } catch (err) {
+      console.error("Failed to apply chainlist:", err);
+      setError(err.response?.data?.detail || err.message || "应用采集链路失败");
     }
   };
 
@@ -2167,6 +2193,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const activeFlowInfo = activeFlowMeta
     ? `match流：${activeFlowMeta.collectable_flow_count || 0}/${activeFlowMeta.raw_flow_count || 0} 可采集`
     : "";
+  const selectedChainlistCount = selectedChainlistStreamIds.size;
 
   const scopeText = focusTarget
     ? focusTarget.nodeType === "camera"
@@ -2364,7 +2391,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     { key: "display_id", label: "设备ID", className: "min-w-[18rem]", render: (row) => formatValue(row.display_id || row.device_id || row.camera_id) },
     { key: "source_ip", label: "摄像机IP", className: "min-w-[12rem]", render: (row) => formatValue(row.source_ip) },
     { key: "destination_ip", label: "服务器IP", className: "min-w-[12rem]", render: (row) => formatValue(row.destination_ip || row.server_id) },
-    { key: "ssrc", label: "SSRC", className: "min-w-[12rem]" },
+    { key: "ssrc", label: "SSRC", className: "min-w-[12rem]", render: (row) => formatStreamSsrc(row.ssrc) },
     {
       key: "link_status",
       label: "链路状态",
@@ -2396,6 +2423,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
               <RefreshCw size="var(--icon-bottom)" />
               刷新
             </button>
+            {activeTab === "stream" && (
+              <button type="button" onClick={applySelectedChainlist} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-medium text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-accent)]">
+                <Link2 size="var(--icon-bottom)" />
+                应用采集{selectedChainlistCount ? `(${selectedChainlistCount})` : ""}
+              </button>
+            )}
             {activeTab === "stream" && (
               <button type="button" onClick={handleRefreshActiveFlows} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)] hover:bg-[var(--color-accent)]">
                 <RefreshCw size="var(--icon-bottom)" />
@@ -2458,7 +2491,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
 
         {activeTab === "stream" && activeFlowInfo && !detail && !diagnosisCamera && (
           <div className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-muted)]">
-            {activeFlowInfo}；来源：{activeFlowMeta?.source_file || "缓存"}；只有上下行配置完整的流会写入 chainlist。
+            {activeFlowInfo}；来源：{activeFlowMeta?.source_file || "match结果"}；勾选在线完整流后点击“应用采集”，未勾选时自动选择最多 5 条在线完整流。
           </div>
         )}
 
@@ -2476,7 +2509,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
         ) : activeTab === "server" ? (
           <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
         ) : (
-          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly renderExpanded={(item) => <StreamSegmentTable stream={item} />} />
+          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly renderExpanded={(item) => <StreamSegmentTable stream={item} />} selection={{ selectedIds: selectedChainlistStreamIds, onToggle: toggleChainlistStream, isDisabled: (row) => !row.is_connected }} />
         )}
       </section>
 
