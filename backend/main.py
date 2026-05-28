@@ -38,6 +38,7 @@ CHAINLIST_FILE = Path(os.getenv("VIOT_CHAINLIST_FILE", "/home/monitor_realtime/c
 MATCH_SCRIPT_PATH = Path(os.getenv("VIOT_MATCH_SCRIPT_PATH", "/home/monitor_realtime/network/match_uplink_downlink_flows.py"))
 MATCH_OUTPUT_FILE = Path(os.getenv("VIOT_MATCH_OUTPUT_FILE", "/home/monitor_realtime/network/uplink_downlink_match.json"))
 ANOMALY_LOG_FILE = Path(os.getenv("VIOT_ANOMALY_LOG_FILE", "/home/monitor_realtime/output/anomaly_log.jsonl"))
+METRICS_CSV_ROOT = Path(os.getenv("VIOT_METRICS_CSV_ROOT", "/home/monitor_realtime/datas"))
 MAX_COLLECTABLE_FLOWS = int(os.getenv("VIOT_MAX_COLLECTABLE_FLOWS", "5"))
 STREAM_MEDIA_SERVER_IP = os.getenv("VIOT_STREAM_MEDIA_SERVER_IP", "10.193.12.10")
 STREAM_MEDIA_SERVER_ID = os.getenv("VIOT_STREAM_MEDIA_SERVER_ID", f"流媒体服务-{STREAM_MEDIA_SERVER_IP}")
@@ -687,6 +688,70 @@ def _collect_algorithm_anomalies(limit: int = 100) -> list[dict[str, Any]]:
             if len(records) >= limit:
                 return list(reversed(records))
     return list(reversed(records))
+
+
+def _safe_metric_path_part(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="路径参数不能为空")
+    if "/" in text or "\\" in text or ".." in text:
+        raise HTTPException(status_code=400, detail="路径参数非法")
+    return re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", text).strip("_") or "unknown"
+
+
+def _validate_metric_date(value: str | None) -> str:
+    if value:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date 必须是 YYYY-MM-DD") from exc
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _metric_csv_path(entity_type: str, entity_id: str, date_value: str) -> Path:
+    safe_entity_id = _safe_metric_path_part(entity_id)
+    if entity_type in {"node", "database", "netcard"}:
+        return METRICS_CSV_ROOT / date_value / entity_type / f"{safe_entity_id}.csv"
+    if entity_type == "network_uplink":
+        return METRICS_CSV_ROOT / date_value / "network" / "uplink" / f"{safe_entity_id}.csv"
+    if entity_type == "network_downlink":
+        return METRICS_CSV_ROOT / date_value / "network" / "downlink" / f"{safe_entity_id}.csv"
+    raise HTTPException(status_code=400, detail="entity_type 不支持")
+
+
+def _read_metric_history_points(
+    csv_path: Path,
+    metric: str,
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not csv_path.exists():
+        return [], []
+
+    import csv
+
+    with csv_path.open("r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        fieldnames = list(reader.fieldnames or [])
+        if metric not in fieldnames:
+            return [], fieldnames
+        rows = list(reader)
+
+    points: list[dict[str, Any]] = []
+    for row in rows[-limit:]:
+        raw_value = row.get(metric)
+        if raw_value in (None, ""):
+            continue
+        try:
+            value: float | str = float(raw_value)
+        except ValueError:
+            value = str(raw_value)
+        points.append(
+            {
+                "timestamp": row.get("timestamp"),
+                "value": value,
+            }
+        )
+    return points, fieldnames
 
 
 def _attach_anomaly_status_to_flows(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2871,6 +2936,34 @@ def get_algorithm_anomalies_latest(limit: int = Query(default=100, ge=1, le=500)
                 timestamp = None
         result.append(schemas.AlgorithmAnomalyRead(**{**item, "timestamp": timestamp}))
     return result
+
+
+@app.get("/metrics/history")
+def get_metric_history(
+    entity_type: str = Query(..., description="node/database/netcard/network_uplink/network_downlink"),
+    entity_id: str = Query(..., description="实体名称或网络流 key"),
+    metric: str = Query(..., description="指标列名"),
+    date: str | None = Query(default=None, description="YYYY-MM-DD，默认今天"),
+    limit: int = Query(default=30, ge=1, le=1000),
+):
+    normalized_entity_type = str(entity_type or "").strip()
+    normalized_metric = str(metric or "").strip()
+    if not normalized_metric:
+        raise HTTPException(status_code=400, detail="metric 不能为空")
+
+    date_value = _validate_metric_date(date)
+    csv_path = _metric_csv_path(normalized_entity_type, entity_id, date_value)
+    points, columns = _read_metric_history_points(csv_path, normalized_metric, limit)
+    return {
+        "entity_type": normalized_entity_type,
+        "entity_id": entity_id,
+        "metric": normalized_metric,
+        "date": date_value,
+        "source_file": str(csv_path),
+        "exists": csv_path.exists(),
+        "columns": columns,
+        "points": points,
+    }
 
 
 # =========================
