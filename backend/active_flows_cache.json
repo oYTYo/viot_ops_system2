@@ -1,0 +1,1725 @@
+{
+  "updated_at": "2026-05-25T13:31:31.810834Z",
+  "source_file": "fallback",
+  "raw_payload": {
+    "35020000001320000566_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200004788",
+        "ssrc_hex": "0x0bebd4b4",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "port_src": "554",
+          "port_dst": "59717"
+        },
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "port_src": "554",
+          "port_dst": "64218"
+        }
+      ]
+    },
+    "35020000001320000580_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200008300",
+        "ssrc_hex": "0x0bebe26c",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020000001320000593_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200008299",
+        "ssrc_hex": "0x0bebe26b",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": []
+    },
+    "35020000001320000612_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000409",
+        "ssrc_hex": "0x0bebc399",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "port_src": "554",
+          "port_dst": "57425"
+        }
+      ]
+    },
+    "35020000001320000596_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000801",
+        "ssrc_hex": "0x0bebc521",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": []
+    },
+    "35020000001320000562_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000806",
+        "ssrc_hex": "0x0bebc526",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020000001320000569_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000817",
+        "ssrc_hex": "0x0bebc531",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020000001320000546_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000819",
+        "ssrc_hex": "0x0bebc533",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020000001320000570_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000813",
+        "ssrc_hex": "0x0bebc52d",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020000001320000588_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000820",
+        "ssrc_hex": "0x0bebc534",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": []
+    },
+    "35020000001320000584_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000818",
+        "ssrc_hex": "0x0bebc532",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020000001320000542_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000826",
+        "ssrc_hex": "0x0bebc53a",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": []
+    },
+    "35020000001320000592_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000828",
+        "ssrc_hex": "0x0bebc53c",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020000001320000608_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000831",
+        "ssrc_hex": "0x0bebc53f",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": []
+    },
+    "35020000001320000556_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000834",
+        "ssrc_hex": "0x0bebc542",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": []
+    },
+    "35020000001320000591_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000836",
+        "ssrc_hex": "0x0bebc544",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020600531321000555_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000837",
+        "ssrc_hex": "0x0c4752c5",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": []
+    },
+    "35020000001320000613_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000843",
+        "ssrc_hex": "0x0bebc54b",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020601581314000376_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017111",
+        "ssrc_hex": "0x0c479257",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": []
+    },
+    "35020600531321000556_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000865",
+        "ssrc_hex": "0x0c4752e1",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": []
+    },
+    "35020601581314000560_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017126",
+        "ssrc_hex": "0x0c479266",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": []
+    },
+    "35020601581314000526_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017127",
+        "ssrc_hex": "0x0c479267",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": []
+    },
+    "35020601581314000813_0": null,
+    "35020601581314000361_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017133",
+        "ssrc_hex": "0x0c47926d",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020601581314000583_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017132",
+        "ssrc_hex": "0x0c47926c",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": []
+    },
+    "35020000001320000149_0": {
+      "uplink": {
+        "ip_src": "172.26.236.140",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000878",
+        "ssrc_hex": "0x0bebc56e",
+        "port_src": "63196",
+        "port_dst": "9014"
+      },
+      "downlink": []
+    },
+    "35020000001320000287_0": {
+      "uplink": {
+        "ip_src": "172.26.236.139",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000879",
+        "ssrc_hex": "0x0bebc56f",
+        "port_src": "62912",
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020000001320000315_0": {
+      "uplink": {
+        "ip_src": "172.26.236.139",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000880",
+        "ssrc_hex": "0x0bebc570",
+        "port_src": "62914",
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020601581314000820_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017135",
+        "ssrc_hex": "0x0c47926f",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": []
+    },
+    "35020601581314000375_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017136",
+        "ssrc_hex": "0x0c479270",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": []
+    },
+    "35020000001320000540_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000882",
+        "ssrc_hex": "0x0bebc572",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020000001320000594_1_1778120792401_HuN": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000885",
+        "ssrc_hex": "0x47868f75",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020000001320000624_0": {
+      "uplink": {
+        "ip_src": "172.26.235.9",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000886",
+        "ssrc_hex": "0x0bebc576",
+        "port_src": "64950",
+        "port_dst": "9018"
+      },
+      "downlink": []
+    },
+    "35020601581314000503_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017138",
+        "ssrc_hex": "0x0c479272",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": []
+    },
+    "35020601581314000524_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017137",
+        "ssrc_hex": "0x0c479271",
+        "port_src": null,
+        "port_dst": "9002"
+      },
+      "downlink": []
+    },
+    "35020601581314000530_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017139",
+        "ssrc_hex": "0x0c479273",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": []
+    },
+    "35020601581314000385_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017140",
+        "ssrc_hex": "0x0c479274",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "port_src": "554",
+          "port_dst": "15673"
+        }
+      ]
+    },
+    "35020600531321000557_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000891",
+        "ssrc_hex": "0x0c4752fb",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": []
+    },
+    "35020000001320000594_1_1778120802351_tgZ": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000893",
+        "ssrc_hex": "0x47868f7d",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": []
+    },
+    "35020601581314000393_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017141",
+        "ssrc_hex": "0x0c479275",
+        "port_src": null,
+        "port_dst": "9002"
+      },
+      "downlink": []
+    },
+    "35020601581314000730_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017142",
+        "ssrc_hex": "0x0c479276",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020601581314000355_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017143",
+        "ssrc_hex": "0x0c479277",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": []
+    },
+    "35020601581314000387_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017145",
+        "ssrc_hex": "0x0c479279",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": []
+    },
+    "35020601581314000347_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017144",
+        "ssrc_hex": "0x0c479278",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": []
+    },
+    "35020000001320000594_1_1778120817438_rib": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000900",
+        "ssrc_hex": "0x47868f84",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": []
+    },
+    "35020600531321000558_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000901",
+        "ssrc_hex": "0x0c475305",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": []
+    },
+    "35020601581314000412_0": {
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017146",
+        "ssrc_hex": "0x0c47927a",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": []
+    }
+  },
+  "flows": [
+    {
+      "device_id": "35020000001320000566_0",
+      "camera_name": "35020000001320000566_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200004788",
+        "ssrc_hex": "0x0bebd4b4",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "ssrc": null,
+          "ssrc_hex": null,
+          "port_src": "554",
+          "port_dst": "59717"
+        },
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "ssrc": null,
+          "ssrc_hex": null,
+          "port_src": "554",
+          "port_dst": "64218"
+        }
+      ],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000580_0",
+      "camera_name": "35020000001320000580_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200008300",
+        "ssrc_hex": "0x0bebe26c",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000593_0",
+      "camera_name": "35020000001320000593_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200008299",
+        "ssrc_hex": "0x0bebe26b",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000612_0",
+      "camera_name": "35020000001320000612_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000409",
+        "ssrc_hex": "0x0bebc399",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "ssrc": null,
+          "ssrc_hex": null,
+          "port_src": "554",
+          "port_dst": "57425"
+        }
+      ],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000596_0",
+      "camera_name": "35020000001320000596_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000801",
+        "ssrc_hex": "0x0bebc521",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000562_0",
+      "camera_name": "35020000001320000562_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000806",
+        "ssrc_hex": "0x0bebc526",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000569_0",
+      "camera_name": "35020000001320000569_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000817",
+        "ssrc_hex": "0x0bebc531",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000546_0",
+      "camera_name": "35020000001320000546_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000819",
+        "ssrc_hex": "0x0bebc533",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000570_0",
+      "camera_name": "35020000001320000570_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000813",
+        "ssrc_hex": "0x0bebc52d",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000588_0",
+      "camera_name": "35020000001320000588_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000820",
+        "ssrc_hex": "0x0bebc534",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000584_0",
+      "camera_name": "35020000001320000584_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000818",
+        "ssrc_hex": "0x0bebc532",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000542_0",
+      "camera_name": "35020000001320000542_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000826",
+        "ssrc_hex": "0x0bebc53a",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000592_0",
+      "camera_name": "35020000001320000592_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000828",
+        "ssrc_hex": "0x0bebc53c",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000608_0",
+      "camera_name": "35020000001320000608_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000831",
+        "ssrc_hex": "0x0bebc53f",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000556_0",
+      "camera_name": "35020000001320000556_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000834",
+        "ssrc_hex": "0x0bebc542",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000591_0",
+      "camera_name": "35020000001320000591_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000836",
+        "ssrc_hex": "0x0bebc544",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020600531321000555_0",
+      "camera_name": "35020600531321000555_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000837",
+        "ssrc_hex": "0x0c4752c5",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000613_0",
+      "camera_name": "35020000001320000613_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000843",
+        "ssrc_hex": "0x0bebc54b",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000376_0",
+      "camera_name": "35020601581314000376_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017111",
+        "ssrc_hex": "0x0c479257",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020600531321000556_0",
+      "camera_name": "35020600531321000556_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000865",
+        "ssrc_hex": "0x0c4752e1",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000560_0",
+      "camera_name": "35020601581314000560_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017126",
+        "ssrc_hex": "0x0c479266",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000526_0",
+      "camera_name": "35020601581314000526_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017127",
+        "ssrc_hex": "0x0c479267",
+        "port_src": null,
+        "port_dst": "9006"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000361_0",
+      "camera_name": "35020601581314000361_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017133",
+        "ssrc_hex": "0x0c47926d",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000583_0",
+      "camera_name": "35020601581314000583_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017132",
+        "ssrc_hex": "0x0c47926c",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000149_0",
+      "camera_name": "35020000001320000149_0",
+      "camera_ip": "172.26.236.140",
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": "172.26.236.140",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000878",
+        "ssrc_hex": "0x0bebc56e",
+        "port_src": "63196",
+        "port_dst": "9014"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000287_0",
+      "camera_name": "35020000001320000287_0",
+      "camera_ip": "172.26.236.139",
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": "172.26.236.139",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000879",
+        "ssrc_hex": "0x0bebc56f",
+        "port_src": "62912",
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000315_0",
+      "camera_name": "35020000001320000315_0",
+      "camera_ip": "172.26.236.139",
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": "172.26.236.139",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000880",
+        "ssrc_hex": "0x0bebc570",
+        "port_src": "62914",
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000820_0",
+      "camera_name": "35020601581314000820_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017135",
+        "ssrc_hex": "0x0c47926f",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000375_0",
+      "camera_name": "35020601581314000375_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017136",
+        "ssrc_hex": "0x0c479270",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000540_0",
+      "camera_name": "35020000001320000540_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000882",
+        "ssrc_hex": "0x0bebc572",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000594_1_1778120792401_HuN",
+      "camera_name": "35020000001320000594_1_1778120792401_HuN",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000885",
+        "ssrc_hex": "0x47868f75",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000624_0",
+      "camera_name": "35020000001320000624_0",
+      "camera_ip": "172.26.235.9",
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": "172.26.235.9",
+        "ip_dst": "10.193.12.10",
+        "ssrc": "200000886",
+        "ssrc_hex": "0x0bebc576",
+        "port_src": "64950",
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000503_0",
+      "camera_name": "35020601581314000503_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017138",
+        "ssrc_hex": "0x0c479272",
+        "port_src": null,
+        "port_dst": "9004"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000524_0",
+      "camera_name": "35020601581314000524_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017137",
+        "ssrc_hex": "0x0c479271",
+        "port_src": null,
+        "port_dst": "9002"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000530_0",
+      "camera_name": "35020601581314000530_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017139",
+        "ssrc_hex": "0x0c479273",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000385_0",
+      "camera_name": "35020601581314000385_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017140",
+        "ssrc_hex": "0x0c479274",
+        "port_src": null,
+        "port_dst": "9008"
+      },
+      "downlink": [
+        {
+          "ip_src": "10.193.12.10",
+          "ip_dst": "10.193.12.249",
+          "ssrc": null,
+          "ssrc_hex": null,
+          "port_src": "554",
+          "port_dst": "15673"
+        }
+      ],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020600531321000557_0",
+      "camera_name": "35020600531321000557_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000891",
+        "ssrc_hex": "0x0c4752fb",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000594_1_1778120802351_tgZ",
+      "camera_name": "35020000001320000594_1_1778120802351_tgZ",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000893",
+        "ssrc_hex": "0x47868f7d",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000393_0",
+      "camera_name": "35020601581314000393_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017141",
+        "ssrc_hex": "0x0c479275",
+        "port_src": null,
+        "port_dst": "9002"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000730_0",
+      "camera_name": "35020601581314000730_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017142",
+        "ssrc_hex": "0x0c479276",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000355_0",
+      "camera_name": "35020601581314000355_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017143",
+        "ssrc_hex": "0x0c479277",
+        "port_src": null,
+        "port_dst": "9014"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000387_0",
+      "camera_name": "35020601581314000387_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017145",
+        "ssrc_hex": "0x0c479279",
+        "port_src": null,
+        "port_dst": "9012"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000347_0",
+      "camera_name": "35020601581314000347_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017144",
+        "ssrc_hex": "0x0c479278",
+        "port_src": null,
+        "port_dst": "9000"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020000001320000594_1_1778120817438_rib",
+      "camera_name": "35020000001320000594_1_1778120817438_rib",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "1200000900",
+        "ssrc_hex": "0x47868f84",
+        "port_src": null,
+        "port_dst": "9010"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020600531321000558_0",
+      "camera_name": "35020600531321000558_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206000901",
+        "ssrc_hex": "0x0c475305",
+        "port_src": null,
+        "port_dst": "9016"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    },
+    {
+      "device_id": "35020601581314000412_0",
+      "camera_name": "35020601581314000412_0",
+      "camera_ip": null,
+      "server_ip": "10.193.12.10",
+      "uplink": {
+        "ip_src": null,
+        "ip_dst": "10.193.12.10",
+        "ssrc": "206017146",
+        "ssrc_hex": "0x0c47927a",
+        "port_src": null,
+        "port_dst": "9018"
+      },
+      "downlink": [],
+      "collectable": false,
+      "missing_fields": [
+        "ip_src",
+        "port_src",
+        "downlink"
+      ],
+      "connectivity_status": "config_missing",
+      "detection_status": "config_missing",
+      "matched_anomaly_count": 0,
+      "matched_anomaly_types": []
+    }
+  ],
+  "chainlist_format": "device_map",
+  "stdout": "",
+  "database_sync": {
+    "streams_seen": 46,
+    "segments_seen": 50,
+    "streams_updated": 46,
+    "streams_marked_offline": 1,
+    "segments_marked_offline": 2
+  }
+}

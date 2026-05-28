@@ -1,8 +1,10 @@
 import request from "./request";
 
+const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+.-]*:\/\//i;
+
 export function resolveApiUrl(path) {
   if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
+  if (ABSOLUTE_URL_PATTERN.test(path)) return path;
 
   const baseUrl = request.defaults.baseURL || window.location.origin;
   if (path.startsWith("/videos/") && typeof window !== "undefined") {
@@ -21,11 +23,36 @@ export function resolveApiUrl(path) {
   return new URL(path, baseUrl).toString();
 }
 
+function normalizePreviewCandidate(candidate) {
+  if (typeof candidate === "string") {
+    return {
+      url: resolveApiUrl(candidate),
+    };
+  }
+
+  if (!candidate?.url) return null;
+
+  return {
+    ...candidate,
+    url: resolveApiUrl(candidate.url),
+  };
+}
+
+function normalizePreview(data = {}) {
+  const candidates = Array.isArray(data.candidates)
+    ? data.candidates.map(normalizePreviewCandidate).filter(Boolean)
+    : [];
+  const playUrl = resolveApiUrl(data.play_url);
+
+  return {
+    ...data,
+    play_url: playUrl,
+    candidates,
+  };
+}
+
 export async function getCameraPreview(cameraId) {
   const res = await request.get(`/cameras/${cameraId}/preview`);
 
-  return {
-    ...res.data,
-    play_url: resolveApiUrl(res.data.play_url),
-  };
+  return normalizePreview(res.data);
 }

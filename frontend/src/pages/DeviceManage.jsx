@@ -31,6 +31,8 @@ import { getRegionByCode, getRegions } from "../services/regionApi";
 import { getCameraPreview } from "../services/videoApi";
 import { getLatestVideoDiagnosis, runVideoDiagnosis } from "../services/diagnosisApi";
 import { getStatisticsOverview } from "../services/statisticsApi";
+import { getAlgorithmActiveFlows, refreshAlgorithmActiveFlows } from "../services/algorithmApi";
+import LivePlayer from "../components/LivePlayer";
 
 const cameraInitialForm = {
   id: "",
@@ -112,6 +114,109 @@ function streamStatusText(stream) {
   if (!stream.is_connected) return "断开";
   if (stream.is_fault) return "异常";
   return "正常";
+}
+
+function segmentDirectionText(direction) {
+  if (direction === "uplink") return "上行";
+  if (direction === "downlink") return "下行";
+  return direction || "未知";
+}
+
+function segmentStatusText(segment) {
+  if (segment.status === "offline") return "未连通";
+  if (segment.is_fault) return "异常";
+  return "正常";
+}
+
+function formatEndpoint(endpoint = {}) {
+  const ip = endpoint.ip_src || endpoint.source_ip || "-";
+  const port = endpoint.port_src || endpoint.source_port;
+  return port ? `${ip}:${port}` : ip;
+}
+
+function formatDestination(endpoint = {}) {
+  const ip = endpoint.ip_dst || endpoint.destination_ip || "-";
+  const port = endpoint.port_dst || endpoint.destination_port;
+  return port ? `${ip}:${port}` : ip;
+}
+
+const CONNECTED_FLOW_STATUSES = new Set(["online", "connected", "normal", "collectable"]);
+
+function isActiveFlowConnected(flow) {
+  if (flow.collectable === false) return false;
+  const status = String(flow.connectivity_status || flow.status || "").trim().toLowerCase();
+  if (!status) return Boolean(flow.collectable);
+  return CONNECTED_FLOW_STATUSES.has(status);
+}
+
+function normalizeKeyPart(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildStreamIdentity(stream) {
+  return [
+    stream.camera_id || stream.device_id || stream.display_id,
+    stream.source_ip,
+    stream.source_port,
+    stream.destination_ip || stream.server_id,
+    stream.destination_port,
+    stream.ssrc,
+  ].map(normalizeKeyPart).join("|");
+}
+
+function normalizeMatchFlowToStream(flow) {
+  const uplink = flow.uplink || {};
+  const downlinks = Array.isArray(flow.downlink) ? flow.downlink : [];
+  const ssrc = uplink.ssrc_hex || uplink.ssrc || "";
+  const connected = isActiveFlowConnected(flow);
+  const segments = [
+    ...(uplink.ip_src || uplink.ip_dst
+      ? [
+          {
+            id: `${flow.device_id}-uplink`,
+            direction: "uplink",
+            source_ip: uplink.ip_src,
+            source_port: uplink.port_src,
+            destination_ip: uplink.ip_dst,
+            destination_port: uplink.port_dst,
+            ssrc,
+            status: connected ? "online" : "config_missing",
+            is_fault: flow.detection_status === "anomaly",
+          },
+        ]
+      : []),
+    ...downlinks.map((item, index) => ({
+      id: `${flow.device_id}-downlink-${index}`,
+      direction: "downlink",
+      source_ip: item.ip_src,
+      source_port: item.port_src,
+      destination_ip: item.ip_dst,
+      destination_port: item.port_dst,
+      ssrc: item.ssrc_hex || item.ssrc || ssrc,
+      status: connected ? "online" : "config_missing",
+      is_fault: flow.detection_status === "anomaly",
+    })),
+  ];
+
+  return {
+    id: `active-${flow.device_id}`,
+    display_id: flow.device_id,
+    device_id: flow.device_id,
+    camera_id: flow.device_id,
+    camera_name: flow.camera_name,
+    server_id: flow.server_ip || "",
+    source_ip: uplink.ip_src || flow.camera_ip || "",
+    source_port: uplink.port_src || "",
+    destination_ip: uplink.ip_dst || flow.server_ip || "",
+    destination_port: uplink.port_dst || "",
+    ssrc,
+    is_connected: connected,
+    is_fault: flow.detection_status === "anomaly",
+    link_type: "match活跃流",
+    stream_type: "实时识别",
+    active_flow: flow,
+    segments,
+  };
 }
 
 function getCameraIdFromNode(camera) {
@@ -272,12 +377,28 @@ function MetricCard({ icon: Icon, label, value }) {
   );
 }
 
-function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDiagnose, readonly = false }) {
+function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDiagnose, readonly = false, renderExpanded = null }) {
+  const [expandedRows, setExpandedRows] = useState(() => new Set());
+  const hasExpanded = typeof renderExpanded === "function";
+  const extraColumnCount = 1 + (onDiagnose ? 1 : 0) + (hasExpanded ? 1 : 0);
+
+  const toggleExpanded = (rowId) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)]">
       <table className="w-max min-w-full border-separate border-spacing-0 text-left text-ui-medium">
         <thead className="sticky top-0 z-10 bg-[var(--color-control-bg)] text-[var(--color-text-muted)]">
           <tr>
+            {hasExpanded && (
+              <th className="w-[4.2rem] whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold">展开</th>
+            )}
             {columns.map((column) => (
               <th key={column.key} className={`whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] font-semibold ${column.className || "min-w-[12rem]"}`}>
                 {column.label}
@@ -296,48 +417,146 @@ function DeviceTable({ columns, rows, emptyText, onView, onEdit, onDelete, onDia
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + 1 + (onDiagnose ? 1 : 0)} className="px-[var(--layout-content-padding)] py-[var(--layout-content-padding)] text-center text-[var(--color-text-muted)]">
+              <td colSpan={columns.length + extraColumnCount} className="px-[var(--layout-content-padding)] py-[var(--layout-content-padding)] text-center text-[var(--color-text-muted)]">
                 {emptyText}
               </td>
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={row.id} className="text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)]">
-                {columns.map((column) => (
-                  <td key={column.key} className={`whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] ${column.className || "min-w-[12rem]"}`}>
-                    {column.render ? column.render(row) : formatValue(row[column.key])}
+              <Fragment key={row.id}>
+                <tr className="text-[var(--color-text-main)] hover:bg-[var(--color-hover-bg)]">
+                  {hasExpanded && (
+                    <td className="whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)]">
+                      <button type="button" title={expandedRows.has(row.id) ? "收起链路详情" : "展开链路详情"} onClick={() => toggleExpanded(row.id)} className="grid rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
+                        {expandedRows.has(row.id) ? <ChevronDown size="var(--icon-tree-main)" /> : <ChevronRight size="var(--icon-tree-main)" />}
+                      </button>
+                    </td>
+                  )}
+                  {columns.map((column) => (
+                    <td key={column.key} className={`whitespace-nowrap border-b border-[var(--color-panel-border)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] ${column.className || "min-w-[12rem]"}`}>
+                      {column.render ? column.render(row) : formatValue(row[column.key])}
+                    </td>
+                  ))}
+                  {onDiagnose && (
+                    <td className="sticky right-[10rem] z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
+                      <button type="button" onClick={() => onDiagnose(row)} className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small font-medium text-[var(--color-topbar-active-text)]">
+                        <Zap size="var(--icon-bottom)" />
+                        诊断
+                      </button>
+                    </td>
+                  )}
+                  <td className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
+                    <div className="flex items-center gap-[var(--layout-search-gap)]">
+                      <button type="button" title="详情" onClick={() => onView(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
+                        <Eye size="var(--icon-tree-main)" />
+                      </button>
+                      {!readonly && (
+                        <>
+                          <button type="button" title="编辑" onClick={() => onEdit(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
+                            <Edit3 size="var(--icon-tree-main)" />
+                          </button>
+                          <button type="button" title="删除" onClick={() => onDelete(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)]">
+                            <Trash2 size="var(--icon-tree-main)" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
-                ))}
-                {onDiagnose && (
-                  <td className="sticky right-[10rem] z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
-                    <button type="button" onClick={() => onDiagnose(row)} className="flex items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] text-ui-small font-medium text-[var(--color-topbar-active-text)]">
-                      <Zap size="var(--icon-bottom)" />
-                      诊断
-                    </button>
-                  </td>
+                </tr>
+                {hasExpanded && expandedRows.has(row.id) && (
+                  <tr className="bg-[var(--color-control-bg)]">
+                    <td colSpan={columns.length + extraColumnCount} className="border-b border-[var(--color-panel-border)] px-[var(--layout-content-padding)] py-[var(--layout-content-gap)]">
+                      {renderExpanded(row)}
+                    </td>
+                  </tr>
                 )}
-                <td className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-device-table-padding-y)] shadow-[-0.75rem_0_1rem_rgba(0,0,0,0.08)]">
-                  <div className="flex items-center gap-[var(--layout-search-gap)]">
-                    <button type="button" title="详情" onClick={() => onView(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
-                      <Eye size="var(--icon-tree-main)" />
-                    </button>
-                    {!readonly && (
-                      <>
-                        <button type="button" title="编辑" onClick={() => onEdit(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-accent)]">
-                          <Edit3 size="var(--icon-tree-main)" />
-                        </button>
-                        <button type="button" title="删除" onClick={() => onDelete(row)} className="rounded-[var(--layout-radius-sm)] p-[var(--layout-tree-action-padding)] text-[var(--color-icon-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error-text)]">
-                          <Trash2 size="var(--icon-tree-main)" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
+              </Fragment>
             ))
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function StreamSegmentTable({ stream }) {
+  const segments = Array.isArray(stream.segments) ? stream.segments : [];
+  const uplinkSegments = segments.filter((segment) => segment.direction === "uplink");
+  const downlinkSegments = segments.filter((segment) => segment.direction === "downlink");
+  const endpointText = (ip, port) => {
+    const cleanIp = ip === null || ip === undefined || ip === "" ? "缺失" : String(ip);
+    const cleanPort = port === null || port === undefined || port === "" ? "" : String(port);
+    return cleanPort ? `${cleanIp}:${cleanPort}` : cleanIp;
+  };
+  const formatSsrcHex = (value) => {
+    if (value === null || value === undefined || value === "") return "-";
+    if (typeof value === "string" && /^0x/i.test(value)) return value.toLowerCase();
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? `0x${Math.trunc(parsed).toString(16)}` : String(value);
+  };
+  const segmentLine = (segment) => `${endpointText(segment.source_ip, segment.source_port)} -> ${endpointText(segment.destination_ip, segment.destination_port)}`;
+  const statusBadgeClass = (segment) => `inline-flex items-center rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] ${segment.is_fault ? statusClass("fault") : segment.status === "offline" ? statusClass("offline") : statusClass("normal")}`;
+
+  if (!segments.length) {
+    return <div className="rounded-[var(--layout-radius-sm)] border border-dashed border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">暂无上下行网络段</div>;
+  }
+
+  const uplink = uplinkSegments[0];
+
+  return (
+    <div className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-[var(--color-text-main)] shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset]">
+      <div className="flex flex-col gap-[var(--layout-search-gap)] px-[var(--layout-content-gap)] py-[var(--layout-content-gap)]">
+        <div className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-gap)]">
+          <div className="mb-[var(--layout-search-gap)] flex items-center justify-between gap-[var(--layout-search-gap)]">
+            <div>
+              <div className="text-ui-small text-[var(--color-text-muted)]">上行链路</div>
+              <div className="text-ui-medium font-semibold text-[var(--color-text-main)]">摄像机 -&gt; 服务器</div>
+            </div>
+            <span className="rounded-full border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-tree-action-padding)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-text-muted)]">{uplink ? 1 : 0} 条</span>
+          </div>
+          {uplink ? (
+            <div className="rounded-[var(--layout-radius-sm)] bg-[var(--color-panel-bg)] p-[var(--layout-search-gap)]">
+              <div className="flex flex-wrap items-center gap-[var(--layout-search-gap)] text-ui-small">
+                <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">{endpointText(uplink.source_ip, uplink.source_port)}</span>
+                <span className="text-[var(--color-text-muted)]">-&gt;</span>
+                <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">{endpointText(uplink.destination_ip, uplink.destination_port)}</span>
+                <span className={statusBadgeClass(uplink)}>{segmentStatusText(uplink)}</span>
+                <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatSsrcHex(uplink.ssrc)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-[var(--layout-radius-sm)] border border-dashed border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">暂无上行网络段</div>
+          )}
+        </div>
+
+        <div className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-search-gap)]">
+          <div className="mb-[var(--layout-search-gap)] flex items-center justify-between gap-[var(--layout-search-gap)]">
+            <div>
+              <div className="text-ui-small text-[var(--color-text-muted)]">下行链路</div>
+              <div className="text-ui-medium font-semibold text-[var(--color-text-main)]">服务器 -&gt; 播放端</div>
+            </div>
+            <span className="rounded-full border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-tree-action-padding)] py-[var(--layout-reset-padding-y)] text-ui-small text-[var(--color-text-muted)]">{downlinkSegments.length} 条</span>
+          </div>
+          {downlinkSegments.length ? (
+            <div className="grid gap-[var(--layout-search-gap)]">
+              {downlinkSegments.map((segment, index) => (
+                <div key={segment.id ?? `${segment.direction}-${index}`} className="rounded-[var(--layout-radius-sm)] bg-[var(--color-panel-bg)] p-[var(--layout-search-gap)]">
+                  <div className="flex flex-wrap items-center justify-between gap-[var(--layout-search-gap)] text-ui-small">
+                    <div className="font-medium text-[var(--color-text-main)]">下行 {index + 1}</div>
+                    <span className={statusBadgeClass(segment)}>{segmentStatusText(segment)}</span>
+                  </div>
+                  <div className="mt-[var(--layout-search-gap)] flex flex-wrap items-center gap-[var(--layout-search-gap)] text-ui-small">
+                    <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">{segmentLine(segment)}</span>
+                    <span className="rounded-full bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-reset-padding-y)] font-mono text-[var(--color-text-main)]">SSRC {formatSsrcHex(segment.ssrc)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[var(--layout-radius-sm)] border border-dashed border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-gap)] text-ui-small text-[var(--color-text-muted)]">暂无下行网络段</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -445,27 +664,25 @@ function ResourceGauge({ label, value, tone = "accent" }) {
 }
 
 function CameraPreview({ camera, onDiagnose }) {
+  const [preview, setPreview] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [startTime, setStartTime] = useState(0);
   const [previewError, setPreviewError] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [pendingPlay, setPendingPlay] = useState(false);
   const [clockText, setClockText] = useState("");
   const [previewBox, setPreviewBox] = useState({ width: 0, height: 0 });
   const [videoRatio, setVideoRatio] = useState(16 / 9);
   const previewBoxRef = useRef(null);
-  const videoRef = useRef(null);
   const canPreview = camera.status !== "offline";
 
   useEffect(() => {
-    videoRef.current?.pause();
+    setPreview(null);
     setPreviewUrl("");
     setStartTime(0);
     setPreviewError("");
     setPreviewLoading(false);
     setIsPlaying(false);
-    setPendingPlay(false);
   }, [camera.id, canPreview]);
 
   useEffect(() => {
@@ -481,8 +698,9 @@ function CameraPreview({ camera, onDiagnose }) {
         if (cancelled) return;
 
         setStartTime(Number(data.start_time ?? data.startTime ?? Math.random() * 30));
+        setPreview(data);
         setPreviewUrl(data.play_url || "");
-        setPendingPlay(true);
+        setIsPlaying(Boolean(data.play_url));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -535,42 +753,6 @@ function CameraPreview({ camera, onDiagnose }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!pendingPlay || !previewUrl) return;
-    const video = videoRef.current;
-    if (!video) return;
-
-    const syncVideoRatio = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setVideoRatio(video.videoWidth / video.videoHeight);
-      }
-    };
-
-    const playFromStart = () => {
-      syncVideoRatio();
-      if (Number.isFinite(startTime)) {
-        video.currentTime = startTime;
-      }
-      video.play().then(() => setIsPlaying(true)).catch((err) => {
-        console.error("Failed to play preview video:", err);
-        setPreviewError("视频播放失败");
-      });
-      setPendingPlay(false);
-    };
-
-    if (video.readyState >= 1) {
-      playFromStart();
-      return;
-    }
-
-    video.addEventListener("loadedmetadata", playFromStart, { once: true });
-    video.load();
-
-    return () => {
-      video.removeEventListener("loadedmetadata", playFromStart);
-    };
-  }, [pendingPlay, previewUrl, startTime]);
-
   const videoFrameStyle = useMemo(() => {
     const { width, height } = previewBox;
 
@@ -598,7 +780,6 @@ function CameraPreview({ camera, onDiagnose }) {
     if (!canPreview || previewLoading) return;
 
     if (isPlaying) {
-      videoRef.current?.pause();
       setIsPlaying(false);
       return;
     }
@@ -611,9 +792,10 @@ function CameraPreview({ camera, onDiagnose }) {
         const data = await getCameraPreview(camera.id);
         url = data.play_url || "";
         setStartTime(Number(data.start_time ?? data.startTime ?? Math.random() * 30));
+        setPreview(data);
         setPreviewUrl(url);
       }
-      setPendingPlay(true);
+      setIsPlaying(Boolean(url));
     } catch (err) {
       console.error("Failed to load camera preview:", err);
       setPreviewError(err.response?.data?.detail || err.message || "预览拉取失败");
@@ -625,24 +807,17 @@ function CameraPreview({ camera, onDiagnose }) {
   return (
     <div ref={previewBoxRef} className="relative h-full min-h-[calc(var(--font-large)*12)] overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black">
       <div className="absolute overflow-hidden" style={videoFrameStyle}>
-        {previewUrl ? (
-          <video
-            ref={videoRef}
-            key={`${camera.id}-${previewUrl}`}
-            src={previewUrl}
-            loop
-            muted
-            playsInline
-            preload="auto"
-            className="h-full w-full object-contain"
-            onLoadedMetadata={(event) => {
-              const video = event.currentTarget;
-              if (video.videoWidth > 0 && video.videoHeight > 0) {
-                setVideoRatio(video.videoWidth / video.videoHeight);
-              }
+        {preview && previewUrl && isPlaying ? (
+          <LivePlayer
+            preview={preview}
+            className="h-full w-full"
+            nativeClassName="h-full w-full object-contain"
+            startTime={startTime}
+            onPlaying={() => setIsPlaying(true)}
+            onError={(message) => {
+              setIsPlaying(false);
+              setPreviewError(message || "视频播放失败");
             }}
-            onPause={() => setIsPlaying(false)}
-            onPlay={() => setIsPlaying(true)}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-ui-medium text-white/55">{canPreview ? "" : "离线摄像机不可预览"}</div>
@@ -1753,6 +1928,8 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const [cameras, setCameras] = useState([]);
   const [servers, setServers] = useState([]);
   const [streams, setStreams] = useState([]);
+  const [activeFlowRows, setActiveFlowRows] = useState([]);
+  const [activeFlowMeta, setActiveFlowMeta] = useState(null);
   const [detail, setDetail] = useState(null);
   const [diagnosisCamera, setDiagnosisCamera] = useState(null);
   const [diagnosisFromExternal, setDiagnosisFromExternal] = useState(false);
@@ -1799,12 +1976,19 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     [focusedCameras]
   );
 
+  const combinedStreams = useMemo(() => {
+    const activeRows = activeFlowRows.map(normalizeMatchFlowToStream);
+    const activeKeys = new Set(activeRows.map(buildStreamIdentity));
+    const databaseRows = streams.filter((stream) => !activeKeys.has(buildStreamIdentity(stream)));
+    return [...activeRows, ...databaseRows];
+  }, [activeFlowRows, streams]);
+
   const focusedStreams = useMemo(() => {
     if (cameraId || regionCode || focusTarget?.nodeType === "custom_folder") {
-      return streams.filter((stream) => focusedCameraIds.has(stream.camera_id));
+      return combinedStreams.filter((stream) => focusedCameraIds.has(stream.camera_id));
     }
-    return streams;
-  }, [streams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
+    return combinedStreams;
+  }, [combinedStreams, focusedCameraIds, cameraId, regionCode, focusTarget?.nodeType]);
 
   const shownCameras = useMemo(
     () => filterByKeyword(filterByStatus(focusedCameras, "camera", deviceStatusFilter), keyword, ["id", "name", "ip", "town_name", "server_id"]),
@@ -1815,21 +1999,25 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
     [focusedServers, keyword, deviceStatusFilter]
   );
   const shownStreams = useMemo(
-    () => filterByKeyword(filterByStatus(focusedStreams, "stream", deviceStatusFilter), keyword, ["id", "camera_id", "server_id", "ssrc"]),
+    () => filterByKeyword(filterByStatus(focusedStreams, "stream", deviceStatusFilter), keyword, ["display_id", "device_id", "camera_id", "camera_name", "server_id", "ssrc", "source_ip", "destination_ip"]),
     [focusedStreams, keyword, deviceStatusFilter]
   );
 
   // 拆分1：只加载不需要跟随行政区变动的数据（服务器、流链路）
   const loadCommonData = async () => {
     try {
-      const [serverRows, streamRows] = await Promise.all([
+      const [serverRows, streamRows, activeFlowPayload] = await Promise.all([
         getDeviceServers(),
         getDeviceStreams(),
+        getAlgorithmActiveFlows(),
       ]);
       setServers(serverRows);
       setStreams(streamRows);
+      setActiveFlowRows(activeFlowPayload?.flows || []);
+      setActiveFlowMeta(activeFlowPayload || null);
     } catch (err) {
       console.error("Failed to load common device data:", err);
+      setError(err.response?.data?.detail || err.message || "设备和流链路数据加载失败");
     }
   };
 
@@ -1852,6 +2040,18 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const handleRefresh = async () => {
     loadCommonData();
     await loadCameraData();
+  };
+
+  const handleRefreshActiveFlows = async () => {
+    setError("");
+    try {
+      const payload = await refreshAlgorithmActiveFlows();
+      setActiveFlowRows(payload?.flows || []);
+      setActiveFlowMeta(payload || null);
+    } catch (err) {
+      console.error("Failed to refresh active flows:", err);
+      setError(err.response?.data?.detail || err.message || "刷新流链路信息失败");
+    }
   };
 
   // 仅在组件初次挂载时加载一次服务器和流链路
@@ -1964,6 +2164,9 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   const metricStreamValue = scopeMetrics
     ? formatStatusMetricValue(scopeMetrics.device_status?.streams, "条")
     : `${focusedStreams.filter((item) => item.is_connected).length}/${focusedStreams.length} 条`;
+  const activeFlowInfo = activeFlowMeta
+    ? `match流：${activeFlowMeta.collectable_flow_count || 0}/${activeFlowMeta.raw_flow_count || 0} 可采集`
+    : "";
 
   const scopeText = focusTarget
     ? focusTarget.nodeType === "camera"
@@ -2092,7 +2295,8 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       }
 
       setFormState(null);
-      await loadData();
+      await loadCommonData();
+      await loadCameraData();
     } catch (err) {
       console.error("Failed to save device:", err);
       setFormState((prev) => ({
@@ -2118,7 +2322,8 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
       } else {
         await deleteDeviceServer(entityId);
       }
-      await loadData();
+      await loadCommonData();
+      await loadCameraData();
     } catch (err) {
       console.error("Failed to delete device:", err);
       setError(err.response?.data?.detail || err.message || "删除失败");
@@ -2156,9 +2361,9 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
   ];
 
   const streamColumns = [
-    { key: "id", label: "链路ID", className: "min-w-[18rem]" },
-    { key: "camera_id", label: "摄像机", className: "min-w-[14rem]" },
-    { key: "server_id", label: "服务器", className: "min-w-[14rem]" },
+    { key: "display_id", label: "设备ID", className: "min-w-[18rem]", render: (row) => formatValue(row.display_id || row.device_id || row.camera_id) },
+    { key: "source_ip", label: "摄像机IP", className: "min-w-[12rem]", render: (row) => formatValue(row.source_ip) },
+    { key: "destination_ip", label: "服务器IP", className: "min-w-[12rem]", render: (row) => formatValue(row.destination_ip || row.server_id) },
     { key: "ssrc", label: "SSRC", className: "min-w-[12rem]" },
     {
       key: "link_status",
@@ -2191,6 +2396,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
               <RefreshCw size="var(--icon-bottom)" />
               刷新
             </button>
+            {activeTab === "stream" && (
+              <button type="button" onClick={handleRefreshActiveFlows} className="flex min-h-[var(--layout-segment-button-height)] shrink-0 items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-segment-button-padding-x)] text-ui-medium font-medium text-[var(--color-topbar-active-text)] hover:bg-[var(--color-accent)]">
+                <RefreshCw size="var(--icon-bottom)" />
+                刷新流链路信息
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-[var(--layout-content-gap)]">
@@ -2245,6 +2456,12 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
           </div>
         )}
 
+        {activeTab === "stream" && activeFlowInfo && !detail && !diagnosisCamera && (
+          <div className="rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-[var(--color-text-muted)]">
+            {activeFlowInfo}；来源：{activeFlowMeta?.source_file || "缓存"}；只有上下行配置完整的流会写入 chainlist。
+          </div>
+        )}
+
         {diagnosisCamera ? (
           <VideoDiagnosisView camera={diagnosisCamera} onClose={closeDiagnosis} />
         ) : detail ? (
@@ -2259,7 +2476,7 @@ export default function DeviceManage({ focusTarget, resetVersion = 0, onCloseExt
         ) : activeTab === "server" ? (
           <DeviceTable columns={serverColumns} rows={shownServers} emptyText="当前范围暂无关联服务器" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "server", item }); }} onEdit={(item) => handleOpenEdit("server", item)} onDelete={(item) => handleDelete("server", item)} readonly={readonlyMode} />
         ) : (
-          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly />
+          <DeviceTable columns={streamColumns} rows={shownStreams} emptyText="当前范围暂无流链路" onView={(item) => { setDiagnosisCamera(null); setDetail({ type: "stream", item }); }} readonly renderExpanded={(item) => <StreamSegmentTable stream={item} />} />
         )}
       </section>
 

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import hashlib
+import json
+import os
+import re
 from random import randint
 from pathlib import Path
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -16,6 +22,7 @@ from sqlalchemy.orm import Session
 
 import models
 import schemas
+from cms_preview import PreviewUnavailable, resolve_camera_preview
 from database import SessionLocal, engine
 
 
@@ -25,6 +32,33 @@ BASE_DIR = Path(__file__).resolve().parent
 VIDEOS_DIR = BASE_DIR / "videos"
 NORMAL_VIDEO_NAME = "normal.mp4"
 ANOMALY_VIDEO_NAME = "anomaly.mp4"
+RUNTIME_PROFILE_FILE = Path(os.getenv("VIOT_RUNTIME_PROFILE_FILE", str(BASE_DIR / "runtime_profile.json")))
+ACTIVE_FLOW_CACHE_FILE = Path(os.getenv("VIOT_ACTIVE_FLOW_CACHE_FILE", str(BASE_DIR / "active_flows_cache.json")))
+CHAINLIST_FILE = Path(os.getenv("VIOT_CHAINLIST_FILE", "/home/monitor_realtime/chainlist.json"))
+MATCH_SCRIPT_PATH = Path(os.getenv("VIOT_MATCH_SCRIPT_PATH", "/home/monitor_realtime/network/match_uplink_downlink_flows.py"))
+DEFAULT_MATCH_OUTPUT_FILE = BASE_DIR / "active_flows_match.json"
+NETWORK_MATCH_FALLBACK_FILES = [
+    Path(path.strip())
+    for path in os.getenv(
+        "VIOT_NETWORK_MATCH_FALLBACK_FILES",
+        "/home/monitor_realtime/network/uplink_downlink_match.json,"
+        "/home/monitor_realtime/network/uplink_downlink_match copy.json",
+    ).split(",")
+    if path.strip()
+]
+ANOMALY_LOG_FILE = Path(os.getenv("VIOT_ANOMALY_LOG_FILE", "/home/monitor_realtime/output/anomaly_log.jsonl"))
+MAX_COLLECTABLE_FLOWS = int(os.getenv("VIOT_MAX_COLLECTABLE_FLOWS", "5"))
+STREAM_MEDIA_SERVER_IP = os.getenv("VIOT_STREAM_MEDIA_SERVER_IP", "10.193.12.10")
+STREAM_MEDIA_SERVER_ID = os.getenv("VIOT_STREAM_MEDIA_SERVER_ID", f"流媒体服务-{STREAM_MEDIA_SERVER_IP}")
+RUNTIME_PROFILE_OPTIONS = [
+    {"value": "aliyun-offline1", "label": "阿里云离线检测 1", "description": "读取阿里云离线数据文件。"},
+    {"value": "aliyun-offline2", "label": "阿里云离线检测 2", "description": "读取阿里云 offline2/replay socket 数据。"},
+    {"value": "aliyun-hybrid", "label": "阿里云混合检测", "description": "阿里云环境下混合使用历史与实时数据。"},
+    {"value": "dianxin-hybrid", "label": "电信混合检测", "description": "电信环境下混合使用历史与实时数据。"},
+    {"value": "dianxin-live", "label": "电信实时检测", "description": "电信实时采集链路模式。"},
+]
+REQUIRED_UPLINK_FIELDS = ("ip_src", "ip_dst", "ssrc", "port_src", "port_dst")
+REQUIRED_DOWNLINK_FIELDS = ("ip_src", "ip_dst", "port_src", "port_dst")
 
 app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="videos")
 
@@ -44,6 +78,9 @@ def create_runtime_tables() -> None:
     models.VideoDiagnosis.__table__.create(bind=engine, checkfirst=True)
     models.DeviceGroup.__table__.create(bind=engine, checkfirst=True)
     models.group_camera_link.create(bind=engine, checkfirst=True)
+    models.StreamMediaSegment.__table__.create(bind=engine, checkfirst=True)
+    _ensure_runtime_profile_file()
+    _ensure_active_flow_cache_file()
     _normalize_existing_camera_protocols()
     _ensure_huli_alarm_demo_cameras()
     _ensure_huli_fake_camera_fleet()
@@ -55,6 +92,535 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _write_json_file(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _read_json_file(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _ensure_runtime_profile_file() -> None:
+    if RUNTIME_PROFILE_FILE.exists():
+        return
+    _write_json_file(
+        RUNTIME_PROFILE_FILE,
+        {
+            "runtime_profile": "aliyun-offline2",
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "updated_by": "system",
+        },
+    )
+
+
+def _ensure_active_flow_cache_file() -> None:
+    if ACTIVE_FLOW_CACHE_FILE.exists():
+        return
+    _write_json_file(
+        ACTIVE_FLOW_CACHE_FILE,
+        {
+            "updated_at": None,
+            "source_file": None,
+            "raw_payload": {},
+            "flows": [],
+            "chainlist_format": "device_map",
+        },
+    )
+
+
+def _runtime_profile_options() -> list[schemas.RuntimeProfileOption]:
+    return [schemas.RuntimeProfileOption(**item) for item in RUNTIME_PROFILE_OPTIONS]
+
+
+def _read_runtime_profile_payload() -> dict[str, Any]:
+    _ensure_runtime_profile_file()
+    payload = _read_json_file(RUNTIME_PROFILE_FILE, {})
+    runtime_profile = str(payload.get("runtime_profile") or "aliyun-offline2").strip().lower()
+    valid_values = {item["value"] for item in RUNTIME_PROFILE_OPTIONS}
+    if runtime_profile not in valid_values:
+        raise HTTPException(status_code=500, detail=f"runtime_profile 非法：{runtime_profile}")
+    return {
+        "runtime_profile": runtime_profile,
+        "updated_at": payload.get("updated_at"),
+        "updated_by": payload.get("updated_by"),
+    }
+
+
+def _build_runtime_profile_response() -> schemas.RuntimeProfileRead:
+    payload = _read_runtime_profile_payload()
+    updated_at = None
+    if payload.get("updated_at"):
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]).replace("Z", "+00:00"))
+    return schemas.RuntimeProfileRead(
+        runtime_profile=payload["runtime_profile"],
+        updated_at=updated_at,
+        updated_by=payload.get("updated_by"),
+        profile_file=str(RUNTIME_PROFILE_FILE),
+        auto_restart_enabled=True,
+        options=_runtime_profile_options(),
+    )
+
+
+def _segment_key(direction: str, source_ip: str, source_port: int | None, destination_ip: str, destination_port: int | None, ssrc: str | None) -> str:
+    return ":".join([
+        direction,
+        source_ip or "",
+        "" if source_port is None else str(source_port),
+        destination_ip or "",
+        "" if destination_port is None else str(destination_port),
+        ssrc or "",
+    ])
+
+
+def _normalize_flow_endpoint(data: Any) -> dict[str, str | None]:
+    if not isinstance(data, dict):
+        return {
+            "ip_src": None,
+            "ip_dst": None,
+            "ssrc": None,
+            "ssrc_hex": None,
+            "port_src": None,
+            "port_dst": None,
+        }
+    return {
+        "ip_src": str(data.get("ip_src")).strip() if data.get("ip_src") else None,
+        "ip_dst": str(data.get("ip_dst")).strip() if data.get("ip_dst") else None,
+        "ssrc": str(data.get("ssrc")).strip() if data.get("ssrc") else None,
+        "ssrc_hex": str(data.get("ssrc_hex")).strip() if data.get("ssrc_hex") else None,
+        "port_src": str(data.get("port_src")).strip() if data.get("port_src") else None,
+        "port_dst": str(data.get("port_dst")).strip() if data.get("port_dst") else None,
+    }
+
+
+def _flow_missing_fields(uplink: dict[str, Any], downlinks: list[dict[str, Any]]) -> list[str]:
+    missing = [field for field in REQUIRED_UPLINK_FIELDS if not uplink.get(field)]
+    if not downlinks:
+        missing.append("downlink")
+        return missing
+
+    has_complete_downlink = False
+    for item in downlinks:
+        if not [field for field in REQUIRED_DOWNLINK_FIELDS if not item.get(field)]:
+            has_complete_downlink = True
+            break
+    if not has_complete_downlink:
+        missing.extend([f"downlink.{field}" for field in REQUIRED_DOWNLINK_FIELDS])
+    return missing
+
+
+def _normalize_raw_active_flows(payload: Any) -> list[dict[str, Any]]:
+    flows: list[dict[str, Any]] = []
+    if not isinstance(payload, dict):
+        return flows
+
+    source_payload = {"default": payload} if "uplink" in payload or "downlink" in payload else payload
+    for device_id, value in source_payload.items():
+        if not isinstance(value, dict):
+            continue
+        uplink = _normalize_flow_endpoint(value.get("uplink") or {})
+        downlinks = [
+            _normalize_flow_endpoint(item)
+            for item in (value.get("downlink") or [])
+            if isinstance(item, dict)
+        ]
+        missing_fields = _flow_missing_fields(uplink, downlinks)
+        flows.append(
+            {
+                "device_id": str(device_id),
+                "camera_name": str(device_id),
+                "camera_ip": uplink.get("ip_src"),
+                "server_ip": uplink.get("ip_dst") or (downlinks[0].get("ip_src") if downlinks else None),
+                "uplink": uplink,
+                "downlink": downlinks,
+                "collectable": not missing_fields,
+                "missing_fields": missing_fields,
+                "connectivity_status": "connected" if not missing_fields else "config_missing",
+                "detection_status": "idle" if not missing_fields else "config_missing",
+                "matched_anomaly_count": 0,
+                "matched_anomaly_types": [],
+            }
+        )
+    return flows
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _hash_stream_id(*parts: Any) -> str:
+    raw = "|".join(str(part or "").strip() for part in parts)
+    return f"match-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _default_camera_region(db: Session) -> dict[str, str]:
+    camera = db.query(models.Camera).first()
+    if camera:
+        return {
+            "province_code": camera.province_code,
+            "province_name": camera.province_name,
+            "city_code": camera.city_code,
+            "city_name": camera.city_name,
+            "county_code": camera.county_code,
+            "county_name": camera.county_name,
+            "town_code": camera.town_code,
+            "town_name": camera.town_name,
+        }
+    return {
+        "province_code": "110000",
+        "province_name": "北京市",
+        "city_code": "110100",
+        "city_name": "北京市",
+        "county_code": "110108",
+        "county_name": "海淀区",
+        "town_code": "110108-btpz",
+        "town_name": "北太平庄",
+    }
+
+
+def _ensure_stream_camera(db: Session, flow: dict[str, Any], server_id: str, now: datetime) -> str | None:
+    device_id = str(flow.get("device_id") or "").strip()
+    camera_ip = str(flow.get("camera_ip") or "").strip()
+    if device_id:
+        camera = db.get(models.Camera, device_id)
+        if camera:
+            if camera_ip:
+                camera.ip = camera_ip
+            camera.status = "online"
+            camera.server_id = server_id
+            camera.protocol = camera.protocol or "RTP"
+            camera.stream_type = camera.stream_type or "main"
+            camera.access_type = camera.access_type or "Ethernet"
+            camera.last_heartbeat = now
+            db.add(camera)
+            return camera.id
+
+        camera = models.Camera(
+            id=device_id,
+            name=str(flow.get("camera_name") or device_id),
+            ip=camera_ip or "0.0.0.0",
+            status="online",
+            protocol="RTP",
+            stream_type="main",
+            access_type="Ethernet",
+            server_id=server_id,
+            last_heartbeat=now,
+            **_default_camera_region(db),
+        )
+        db.add(camera)
+        return camera.id
+
+    if camera_ip:
+        camera = db.query(models.Camera).filter(models.Camera.ip == camera_ip).first()
+        if camera:
+            return camera.id
+    return None
+
+
+def _ensure_stream_media_server(db: Session) -> str:
+    server = db.get(models.Server, STREAM_MEDIA_SERVER_ID)
+    if server:
+        if server.ip != STREAM_MEDIA_SERVER_IP:
+            server.ip = STREAM_MEDIA_SERVER_IP
+            db.add(server)
+        return server.id
+
+    server = models.Server(
+        id=STREAM_MEDIA_SERVER_ID,
+        name=STREAM_MEDIA_SERVER_ID,
+        ip=STREAM_MEDIA_SERVER_IP,
+        node_type="stream_server",
+        status="normal",
+        location_desc="match脚本识别的流媒体服务",
+    )
+    db.add(server)
+    return server.id
+
+
+def _upsert_flow_segment(db: Session, stream_media_id: str, direction: str, endpoint: dict[str, Any], ssrc: str | None, now: datetime) -> str | None:
+    source_ip = endpoint.get("ip_src") or ""
+    destination_ip = endpoint.get("ip_dst") or ""
+    if not source_ip and not destination_ip:
+        return None
+
+    key = _segment_key(
+        direction,
+        source_ip,
+        _int_or_none(endpoint.get("port_src")),
+        destination_ip,
+        _int_or_none(endpoint.get("port_dst")),
+        ssrc or endpoint.get("ssrc") or endpoint.get("ssrc_hex"),
+    )
+    segment = db.query(models.StreamMediaSegment).filter(models.StreamMediaSegment.segment_key == key).first()
+    payload = {
+        "stream_media_id": stream_media_id,
+        "segment_key": key,
+        "direction": direction,
+        "source_ip": source_ip,
+        "source_port": _int_or_none(endpoint.get("port_src")),
+        "destination_ip": destination_ip,
+        "destination_port": _int_or_none(endpoint.get("port_dst")),
+        "ssrc": ssrc or endpoint.get("ssrc") or endpoint.get("ssrc_hex"),
+        "status": "online" if source_ip and destination_ip else "config_missing",
+        "is_fault": False,
+        "last_seen_at": now,
+    }
+    if segment:
+        _apply_update(segment, payload)
+    else:
+        segment = models.StreamMediaSegment(**payload, first_seen_at=now)
+    db.add(segment)
+    return key
+
+
+def _sync_active_flows_to_database(db: Session, flows: list[dict[str, Any]]) -> dict[str, int]:
+    now = datetime.utcnow()
+    server_id = _ensure_stream_media_server(db)
+    seen_stream_ids: set[str] = set()
+    seen_segment_keys: set[str] = set()
+    updated_streams = 0
+
+    for flow in flows:
+        uplink = flow.get("uplink") or {}
+        source_ip = uplink.get("ip_src") or flow.get("camera_ip") or "0.0.0.0"
+        destination_ip = uplink.get("ip_dst")
+        ssrc = uplink.get("ssrc") or uplink.get("ssrc_hex")
+        if not destination_ip or not ssrc:
+            continue
+
+        stream_id = _hash_stream_id(source_ip, destination_ip, ssrc)
+        stream = db.get(models.StreamMedia, stream_id)
+        payload = {
+            "source_ip": source_ip,
+            "source_port": _int_or_none(uplink.get("port_src")) or 0,
+            "destination_ip": destination_ip,
+            "destination_port": _int_or_none(uplink.get("port_dst")) or 0,
+            "ssrc": str(ssrc),
+            "camera_id": _ensure_stream_camera(db, flow, server_id, now),
+            "server_id": server_id,
+            "transport_protocol": "RTP",
+            "is_connected": True,
+            "is_fault": False,
+            "link_type": "实时流链路",
+            "stream_type": "主码流",
+            "last_update_time": now,
+        }
+        if stream:
+            _apply_update(stream, payload)
+        else:
+            stream = models.StreamMedia(id=stream_id, **payload)
+        db.add(stream)
+        seen_stream_ids.add(stream_id)
+        updated_streams += 1
+
+        segment_key = _upsert_flow_segment(db, stream_id, "uplink", uplink, str(ssrc), now)
+        if segment_key:
+            seen_segment_keys.add(segment_key)
+        for downlink in flow.get("downlink") or []:
+            segment_key = _upsert_flow_segment(db, stream_id, "downlink", downlink, str(ssrc), now)
+            if segment_key:
+                seen_segment_keys.add(segment_key)
+
+    offline_streams = 0
+    for stream in db.query(models.StreamMedia).filter(models.StreamMedia.id.like("match-%")).all():
+        if stream.id not in seen_stream_ids:
+            stream.is_connected = False
+            stream.last_update_time = now
+            db.add(stream)
+            offline_streams += 1
+
+    offline_segments = 0
+    for segment in (
+        db.query(models.StreamMediaSegment)
+        .join(models.StreamMedia, models.StreamMedia.id == models.StreamMediaSegment.stream_media_id)
+        .filter(models.StreamMedia.id.like("match-%"))
+        .all()
+    ):
+        if segment.segment_key not in seen_segment_keys:
+            segment.status = "offline"
+            segment.last_seen_at = now
+            db.add(segment)
+            offline_segments += 1
+
+    return {
+        "streams_seen": len(seen_stream_ids),
+        "segments_seen": len(seen_segment_keys),
+        "streams_updated": updated_streams,
+        "streams_marked_offline": offline_streams,
+        "segments_marked_offline": offline_segments,
+    }
+
+
+def _build_chainlist_payload(flows: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    payload: dict[str, Any] = {}
+    for flow in [item for item in flows if item.get("collectable")][:MAX_COLLECTABLE_FLOWS]:
+        payload[str(flow["device_id"])] = {
+            "uplink": {
+                key: flow["uplink"].get(key)
+                for key in ("ip_src", "ip_dst", "ssrc", "ssrc_hex", "port_src", "port_dst")
+                if flow["uplink"].get(key) is not None
+            },
+            "downlink": [
+                {
+                    key: item.get(key)
+                    for key in ("ip_src", "ip_dst", "port_src", "port_dst", "ssrc", "ssrc_hex")
+                    if item.get(key) is not None
+                }
+                for item in flow.get("downlink", [])
+                if not [field for field in REQUIRED_DOWNLINK_FIELDS if not item.get(field)]
+            ],
+        }
+    return "device_map", payload
+
+
+def _load_active_flow_cache() -> dict[str, Any]:
+    _ensure_active_flow_cache_file()
+    payload = _read_json_file(ACTIVE_FLOW_CACHE_FILE, {})
+    payload.setdefault("updated_at", None)
+    payload.setdefault("source_file", None)
+    payload.setdefault("raw_payload", {})
+    payload.setdefault("flows", [])
+    payload.setdefault("chainlist_format", "device_map")
+
+    if payload.get("flows"):
+        return payload
+
+    for path in [DEFAULT_MATCH_OUTPUT_FILE, *NETWORK_MATCH_FALLBACK_FILES, CHAINLIST_FILE]:
+        raw_payload = _read_json_file(path, {})
+        if isinstance(raw_payload, dict) and raw_payload:
+            payload["source_file"] = str(path)
+            payload["raw_payload"] = raw_payload
+            payload["flows"] = _normalize_raw_active_flows(raw_payload)
+            payload["chainlist_format"] = "device_map"
+            break
+    return payload
+
+
+def _extract_ips(text: str) -> list[str]:
+    return re.findall(r"(?:\d{1,3}\.){3}\d{1,3}", text or "")
+
+
+def _anomaly_identity_keys(entity_id: str, entity_type: str) -> set[str]:
+    keys = set()
+    text = str(entity_id or "").strip()
+    if not text:
+        return keys
+    keys.add(text)
+    parts = [part for part in text.split("_") if part]
+    ips = _extract_ips(text)
+    if entity_type == "network_uplink" and len(parts) >= 3 and len(ips) >= 2:
+        keys.add(f"uplink|{ips[0]}|{ips[1]}|{parts[-1]}")
+    elif entity_type == "network_downlink" and len(parts) >= 4 and len(ips) >= 2:
+        keys.add(f"downlink|{ips[0]}|{ips[1]}|{parts[2]}|{parts[3]}")
+    return keys
+
+
+def _build_flow_lookup(flows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for flow in flows:
+        uplink = flow.get("uplink") or {}
+        if uplink.get("ip_src") and uplink.get("ip_dst") and (uplink.get("ssrc_hex") or uplink.get("ssrc")):
+            lookup[f"uplink|{uplink.get('ip_src')}|{uplink.get('ip_dst')}|{uplink.get('ssrc_hex') or uplink.get('ssrc')}"] = flow
+        for item in flow.get("downlink") or []:
+            if item.get("ip_src") and item.get("ip_dst") and item.get("port_src") and item.get("port_dst"):
+                lookup[f"downlink|{item.get('ip_src')}|{item.get('ip_dst')}|{item.get('port_src')}|{item.get('port_dst')}"] = flow
+    return lookup
+
+
+def _collect_algorithm_anomalies(limit: int = 100) -> list[dict[str, Any]]:
+    if not ANOMALY_LOG_FILE.exists():
+        return []
+    lines = ANOMALY_LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    flow_lookup = _build_flow_lookup(_load_active_flow_cache().get("flows") or [])
+    records: list[dict[str, Any]] = []
+
+    for line in reversed(lines[-max(limit * 4, limit):]):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for index, entity in enumerate(payload.get("entities") or []):
+            entity_id = str(entity.get("anomaly_entity_id") or "").strip()
+            entity_type = str(entity.get("anomaly_entity_type") or "").strip()
+            matched_flow = None
+            for key in _anomaly_identity_keys(entity_id, entity_type):
+                matched_flow = flow_lookup.get(key)
+                if matched_flow:
+                    break
+            ips = _extract_ips(entity_id)
+            records.append(
+                {
+                    "id": f"{payload.get('run_id') or 'run'}-{payload.get('timestamp')}-{index}",
+                    "timestamp": payload.get("timestamp"),
+                    "source_label": str(matched_flow.get("device_id")) if matched_flow else (ips[0] if ips else entity_id or "unknown"),
+                    "anomaly_entity_id": entity_id,
+                    "anomaly_entity_type": entity_type,
+                    "anomaly_type": entity.get("anomaly_type"),
+                    "anomaly_score": entity.get("anomaly_score"),
+                    "anomaly_column": entity.get("anomaly_column"),
+                    "anomaly_column_value": entity.get("anomaly_column_value"),
+                    "global_anomaly_score": payload.get("global_anomaly_score"),
+                    "root_cause_entity": payload.get("root_cause_entity"),
+                    "root_cause_entity_type": payload.get("root_cause_entity_type"),
+                    "device_id": matched_flow.get("device_id") if matched_flow else None,
+                    "camera_ip": matched_flow.get("camera_ip") if matched_flow else (ips[0] if ips else None),
+                    "server_ip": matched_flow.get("server_ip") if matched_flow else (ips[1] if len(ips) > 1 else None),
+                    "run_id": payload.get("run_id"),
+                    "prediction": entity.get("prediction"),
+                    "reconstruction_error": entity.get("reconstruction_error"),
+                    "raw": payload,
+                }
+            )
+            if len(records) >= limit:
+                return list(reversed(records))
+    return list(reversed(records))
+
+
+def _attach_anomaly_status_to_flows(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_device: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in _collect_algorithm_anomalies(limit=200):
+        if item.get("device_id"):
+            by_device[str(item["device_id"])].append(item)
+
+    for flow in flows:
+        matches = by_device.get(str(flow.get("device_id")), [])
+        flow["matched_anomaly_count"] = len(matches)
+        flow["matched_anomaly_types"] = sorted({str(item.get("anomaly_type") or "") for item in matches if item.get("anomaly_type")})
+        if not flow.get("collectable"):
+            flow["detection_status"] = "config_missing"
+        elif matches:
+            flow["detection_status"] = "anomaly"
+        else:
+            flow["detection_status"] = "ready"
+    return flows
+
+
+def _build_active_flow_response_from_cache() -> schemas.AlgorithmActiveFlowResponse:
+    payload = _load_active_flow_cache()
+    updated_at = None
+    if payload.get("updated_at"):
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]).replace("Z", "+00:00"))
+    flows = _attach_anomaly_status_to_flows(list(payload.get("flows") or []))
+    return schemas.AlgorithmActiveFlowResponse(
+        updated_at=updated_at,
+        source_file=payload.get("source_file"),
+        chainlist_file=str(CHAINLIST_FILE),
+        raw_flow_count=len(flows),
+        collectable_flow_count=len([item for item in flows if item.get("collectable")]),
+        chainlist_format=str(payload.get("chainlist_format") or "device_map"),
+        flows=[schemas.AlgorithmActiveFlowItem(**item) for item in flows],
+    )
 
 
 def _ensure_huli_alarm_demo_cameras() -> None:
@@ -1693,6 +2259,26 @@ def get_camera_preview(camera_id: str, db: Session = Depends(get_db)):
     if camera.status == "offline":
         raise HTTPException(status_code=503, detail="camera offline")
 
+    try:
+        preview = resolve_camera_preview(camera)
+        candidates = list(preview.candidates or [])
+        return {
+            "camera_id": camera.id,
+            "camera_name": camera.name,
+            "play_url": preview.play_url,
+            "start_time": 0,
+            "playback_type": candidates[0]["type"] if candidates else preview.protocol,
+            "protocol": preview.protocol,
+            "device_no": preview.device_no,
+            "stream_id": preview.stream_id,
+            "source": preview.source,
+            "message": preview.message,
+            "candidates": candidates,
+        }
+    except PreviewUnavailable:
+        if camera.video_url and not camera.video_url.startswith("rtsp://example.com"):
+            raise HTTPException(status_code=503, detail="camera preview unavailable")
+
     video_name = ANOMALY_VIDEO_NAME if camera.status == "fault" else NORMAL_VIDEO_NAME
     video_path = VIDEOS_DIR / video_name
     if not video_path.exists():
@@ -1703,6 +2289,10 @@ def get_camera_preview(camera_id: str, db: Session = Depends(get_db)):
         "camera_name": camera.name,
         "play_url": f"/videos/{video_name}",
         "start_time": randint(0, 45),
+        "playback_type": "mp4",
+        "protocol": "http",
+        "source": "demo_video",
+        "candidates": [{"type": "mp4", "url": f"/videos/{video_name}", "source": "demo_video"}],
     }
 
 
@@ -1878,6 +2468,151 @@ def delete_stream_media(stream_media_id: str, db: Session = Depends(get_db)):
     db.delete(obj)
     db.commit()
     return {"message": f"stream_media '{stream_media_id}' deleted"}
+
+
+@app.post(
+    "/stream-media-segments",
+    response_model=schemas.StreamMediaSegmentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_stream_media_segment(payload: schemas.StreamMediaSegmentCreate, db: Session = Depends(get_db)):
+    if not db.get(models.StreamMedia, payload.stream_media_id):
+        raise HTTPException(status_code=404, detail="stream_media not found")
+    if db.query(models.StreamMediaSegment).filter(models.StreamMediaSegment.segment_key == payload.segment_key).first():
+        raise HTTPException(status_code=409, detail=f"stream_media_segment '{payload.segment_key}' already exists")
+
+    obj = models.StreamMediaSegment(**payload.model_dump())
+    db.add(obj)
+    _commit_or_rollback(db, "failed to create stream_media_segment: constraint violation")
+    db.refresh(obj)
+    return obj
+
+
+@app.put("/stream-media-segments/{segment_id}", response_model=schemas.StreamMediaSegmentRead)
+def update_stream_media_segment(
+    segment_id: int,
+    payload: schemas.StreamMediaSegmentUpdate,
+    db: Session = Depends(get_db),
+):
+    obj = db.get(models.StreamMediaSegment, segment_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="stream_media_segment not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    _apply_update(obj, update_data)
+    obj.segment_key = _segment_key(
+        obj.direction,
+        obj.source_ip,
+        obj.source_port,
+        obj.destination_ip,
+        obj.destination_port,
+        obj.ssrc,
+    )
+    db.add(obj)
+    _commit_or_rollback(db, "failed to update stream_media_segment: constraint violation")
+    db.refresh(obj)
+    return obj
+
+
+@app.delete("/stream-media-segments/{segment_id}")
+def delete_stream_media_segment(segment_id: int, db: Session = Depends(get_db)):
+    obj = db.get(models.StreamMediaSegment, segment_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="stream_media_segment not found")
+    db.delete(obj)
+    db.commit()
+    return {"message": f"stream_media_segment '{segment_id}' deleted"}
+
+
+@app.get("/algorithm/runtime-profile", response_model=schemas.RuntimeProfileRead)
+def get_algorithm_runtime_profile():
+    return _build_runtime_profile_response()
+
+
+@app.put("/algorithm/runtime-profile", response_model=schemas.RuntimeProfileRead)
+def update_algorithm_runtime_profile(payload: schemas.RuntimeProfileUpdate):
+    current = _read_runtime_profile_payload()
+    if payload.runtime_profile != current["runtime_profile"]:
+        _write_json_file(
+            RUNTIME_PROFILE_FILE,
+            {
+                "runtime_profile": payload.runtime_profile,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "updated_by": payload.updated_by or "frontend",
+            },
+        )
+    return _build_runtime_profile_response()
+
+
+@app.get("/algorithm/active-flows", response_model=schemas.AlgorithmActiveFlowResponse)
+def get_algorithm_active_flows():
+    return _build_active_flow_response_from_cache()
+
+
+@app.post("/algorithm/active-flows/refresh", response_model=schemas.AlgorithmActiveFlowResponse)
+def refresh_algorithm_active_flows(db: Session = Depends(get_db)):
+    if not MATCH_SCRIPT_PATH.exists():
+        raise HTTPException(status_code=500, detail=f"match 脚本不存在：{MATCH_SCRIPT_PATH}")
+
+    output_file = Path(str(DEFAULT_MATCH_OUTPUT_FILE))
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        str(MATCH_SCRIPT_PATH),
+        "--output",
+        str(output_file),
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="match 脚本执行超时") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or exc.stdout or "").strip()
+        raise HTTPException(status_code=500, detail=f"match 脚本执行失败：{stderr[:500]}") from exc
+
+    raw_payload = _read_json_file(output_file, {})
+    if not isinstance(raw_payload, dict) or not raw_payload:
+        raise HTTPException(status_code=500, detail=f"match 脚本未输出有效 JSON：{output_file}")
+
+    flows = _normalize_raw_active_flows(raw_payload)
+    chainlist_format, chainlist_payload = _build_chainlist_payload(flows)
+    _write_json_file(CHAINLIST_FILE, chainlist_payload)
+    sync_summary = _sync_active_flows_to_database(db, flows)
+    _commit_or_rollback(db, "failed to sync active flows to database")
+    _write_json_file(
+        ACTIVE_FLOW_CACHE_FILE,
+        {
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "source_file": str(output_file),
+            "raw_payload": raw_payload,
+            "flows": flows,
+            "chainlist_format": chainlist_format,
+            "stdout": (result.stdout or "").strip(),
+            "database_sync": sync_summary,
+        },
+    )
+    return _build_active_flow_response_from_cache()
+
+
+@app.get("/algorithm/anomalies/latest", response_model=list[schemas.AlgorithmAnomalyRead])
+def get_algorithm_anomalies_latest(limit: int = Query(default=100, ge=1, le=500)):
+    result = []
+    for item in _collect_algorithm_anomalies(limit=limit):
+        timestamp = None
+        if item.get("timestamp"):
+            try:
+                timestamp = datetime.fromisoformat(str(item["timestamp"]).replace(" ", "T"))
+            except ValueError:
+                timestamp = None
+        result.append(schemas.AlgorithmAnomalyRead(**{**item, "timestamp": timestamp}))
+    return result
 
 
 # =========================

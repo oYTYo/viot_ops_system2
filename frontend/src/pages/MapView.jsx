@@ -8,6 +8,7 @@ import {
 } from "../services/mapApi";
 import { getCameraPreview } from "../services/videoApi";
 import { getStatisticsOverview } from "../services/statisticsApi";
+import LivePlayer from "../components/LivePlayer";
 
 const AMAP_URL = "https://webapi.amap.com/maps?v=2.0";
 const CHINA_CENTER = [104.195397, 35.86166];
@@ -107,7 +108,6 @@ function getCameraMarkerContent(camera, focused = false) {
 function MapCameraPreview({ camera, onClose, onDetail, onDiagnose }) {
   const [state, setState] = useState("connecting");
   const [preview, setPreview] = useState(null);
-  const videoRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,19 +140,6 @@ function MapCameraPreview({ camera, onClose, onDetail, onDiagnose }) {
     };
   }, [camera]);
 
-  useEffect(() => {
-    if (!preview?.play_url || state !== "playing") return undefined;
-    const video = videoRef.current;
-    if (!video) return undefined;
-    const play = () => {
-      video.currentTime = Number(preview.start_time || 0);
-      video.play().catch(() => {});
-    };
-    video.addEventListener("loadedmetadata", play, { once: true });
-    video.load();
-    return () => video.removeEventListener("loadedmetadata", play);
-  }, [preview, state]);
-
   return (
     <div className="absolute left-1/2 top-[var(--layout-content-padding)] z-20 w-[calc(100%-var(--layout-content-padding)*3)] -translate-x-1/2 overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black shadow-[var(--shadow-panel)]">
       <div className="flex items-center justify-between bg-black/80 px-[var(--layout-search-padding-x)] py-[var(--layout-search-padding-y)] text-ui-small text-white">
@@ -164,7 +151,7 @@ function MapCameraPreview({ camera, onClose, onDetail, onDiagnose }) {
       </div>
       <div className="relative aspect-video">
         {state === "playing" && preview?.play_url ? (
-          <video ref={videoRef} src={preview.play_url} muted loop playsInline className="h-full w-full object-cover" />
+          <LivePlayer preview={preview} startTime={Number(preview.start_time || 0)} onError={() => setState("failed")} />
         ) : state === "failed" ? (
           <div className="flex h-full flex-col items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-white">
             <AlertCircle size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />

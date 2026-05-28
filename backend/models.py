@@ -444,6 +444,55 @@ class StreamMedia(Base):
         back_populates="stream_medias",
     )
 
+    segments: Mapped[list["StreamMediaSegment"]] = relationship(
+        back_populates="stream_media",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class StreamMediaSegment(Base):
+    """流链路中的上行或下行网络段。"""
+
+    __tablename__ = "stream_media_segment"
+
+    __table_args__ = (
+        UniqueConstraint("segment_key", name="uq_stream_media_segment_key"),
+        Index("ix_stream_media_segment_stream_media_id", "stream_media_id"),
+        Index("ix_stream_media_segment_direction", "direction"),
+        Index("ix_stream_media_segment_status", "status"),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_media_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stream_media.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    segment_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_ip: Mapped[str] = mapped_column(String(45), nullable=False)
+    source_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    destination_ip: Mapped[str] = mapped_column(String(45), nullable=False)
+    destination_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ssrc: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="online")
+    is_fault: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    stream_media: Mapped[StreamMedia] = relationship(
+        back_populates="segments",
+    )
+
 
 class TopologyLink(Base):
     """拓扑连线信息，用于描述摄像机、服务器、网络节点之间的连接关系。"""
@@ -795,4 +844,3 @@ class DeviceGroup(Base):
         backref="groups",
         lazy="selectin",
     )
-

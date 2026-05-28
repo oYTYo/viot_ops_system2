@@ -2129,13 +2129,15 @@ function ContentPlaceholder({
   onCloseAlarmConfig,
   showPollingConfig,
   onClosePollingConfig,
+  showRuntimeModeConfig,
+  onCloseRuntimeModeConfig,
 }) {
   if (activeTab === "map") {
     return <MapView focusTarget={mapFocusTarget} darkMode={darkMode} onOpenCameraDetail={onOpenCameraDetail} onOpenCameraDiagnosis={onOpenCameraDiagnosis} onNavigateToDevice={onNavigateToDevice} />;
   }
 
   if (activeTab === "alarm") {
-    return <VideoAlarmManage focusTarget={alarmFocusTarget} resetVersion={alarmResetVersion} onOpenCameraDiagnosis={onOpenCameraDiagnosis} showAlarmConfig={showAlarmConfig} onCloseAlarmConfig={onCloseAlarmConfig} showPollingConfig={showPollingConfig} onClosePollingConfig={onClosePollingConfig} />;
+    return <VideoAlarmManage focusTarget={alarmFocusTarget} resetVersion={alarmResetVersion} onOpenCameraDiagnosis={onOpenCameraDiagnosis} showAlarmConfig={showAlarmConfig} onCloseAlarmConfig={onCloseAlarmConfig} showPollingConfig={showPollingConfig} onClosePollingConfig={onClosePollingConfig} showRuntimeModeConfig={showRuntimeModeConfig} onCloseRuntimeModeConfig={onCloseRuntimeModeConfig} />;
   }
 
   if (activeTab === "device") {
@@ -2183,6 +2185,7 @@ function BottomBar({
   onResetDiagnoses,
   onOpenAlarmConfig,
   onOpenPollingConfig,
+  onOpenRuntimeModeConfig,
 }) {
   return (
     <footer className="flex h-[var(--layout-footer-height)] shrink-0 border-t border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-ui-small text-[var(--color-text-muted)] transition-colors">
@@ -2219,7 +2222,7 @@ function BottomBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
-          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses, onOpenAlarmConfig, onOpenPollingConfig })}
+          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses, onOpenAlarmConfig, onOpenPollingConfig, onOpenRuntimeModeConfig })}
         </div>
       </div>
     </footer>
@@ -2243,6 +2246,10 @@ function getPageBottomActions(activeTab, options = {}) {
   if (activeTab === "alarm") {
     return (
       <div className="flex gap-2">
+        <button type="button" onClick={options.onOpenRuntimeModeConfig} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
+          <Settings2 size="var(--icon-bottom)" />
+          模式切换
+        </button>
         <button type="button" onClick={options.onOpenPollingConfig} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-panel-border)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover-bg)]">
           <RotateCw size="var(--icon-bottom)" />
           轮巡配置
@@ -2297,6 +2304,7 @@ export default function VioTMasterLayout() {
   const [statsFocusTarget, setStatsFocusTarget] = useState(null);
   const [showAlarmConfig, setShowAlarmConfig] = useState(false);
   const [showPollingConfig, setShowPollingConfig] = useState(false);
+  const [showRuntimeModeConfig, setShowRuntimeModeConfig] = useState(false);
   const externalDetailReturnTabRef = useRef("");
   const previewingCameraIds = useMemo(() => new Set(), []);
 
@@ -2471,6 +2479,8 @@ export default function VioTMasterLayout() {
           onCloseAlarmConfig={() => setShowAlarmConfig(false)}
           showPollingConfig={showPollingConfig}
           onClosePollingConfig={() => setShowPollingConfig(false)}
+          showRuntimeModeConfig={showRuntimeModeConfig}
+          onCloseRuntimeModeConfig={() => setShowRuntimeModeConfig(false)}
         />
       </div>
 
@@ -2485,6 +2495,7 @@ export default function VioTMasterLayout() {
         }}
         onOpenAlarmConfig={() => setShowAlarmConfig(true)}
         onOpenPollingConfig={() => setShowPollingConfig(true)}
+        onOpenRuntimeModeConfig={() => setShowRuntimeModeConfig(true)}
       />
     </div>
   );

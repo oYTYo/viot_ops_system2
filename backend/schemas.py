@@ -368,6 +368,45 @@ class StreamMediaRead(StreamMediaBase):
     id: str
     created_at: datetime
     updated_at: datetime
+    segments: list["StreamMediaSegmentRead"] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StreamMediaSegmentBase(BaseModel):
+    stream_media_id: str = Field(..., max_length=64)
+    segment_key: str = Field(..., max_length=255)
+    direction: Literal["uplink", "downlink"]
+    source_ip: str = Field(..., max_length=45)
+    source_port: int | None = None
+    destination_ip: str = Field(..., max_length=45)
+    destination_port: int | None = None
+    ssrc: str | None = Field(default=None, max_length=64)
+    status: str = Field(default="online", max_length=32)
+    is_fault: bool = False
+
+
+class StreamMediaSegmentCreate(StreamMediaSegmentBase):
+    pass
+
+
+class StreamMediaSegmentUpdate(BaseModel):
+    direction: Literal["uplink", "downlink"] | None = None
+    source_ip: str | None = Field(default=None, max_length=45)
+    source_port: int | None = None
+    destination_ip: str | None = Field(default=None, max_length=45)
+    destination_port: int | None = None
+    ssrc: str | None = Field(default=None, max_length=64)
+    status: str | None = Field(default=None, max_length=32)
+    is_fault: bool | None = None
+
+
+class StreamMediaSegmentRead(StreamMediaSegmentBase):
+    id: int
+    first_seen_at: datetime
+    last_seen_at: datetime
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -678,6 +717,95 @@ class StatisticsOverviewRead(BaseModel):
     anomaly_patterns: list[dict[str, Any]]
     anomaly_entities: list[dict[str, Any]]
     work_order_efficiency: dict[str, Any]
+
+
+# =========================
+# Algorithm Integration
+# =========================
+
+RuntimeProfileValue = Literal[
+    "aliyun-offline1",
+    "aliyun-offline2",
+    "aliyun-hybrid",
+    "dianxin-hybrid",
+    "dianxin-live",
+]
+
+
+class RuntimeProfileOption(BaseModel):
+    value: RuntimeProfileValue
+    label: str
+    description: str
+
+
+class RuntimeProfileRead(BaseModel):
+    runtime_profile: RuntimeProfileValue
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+    profile_file: str
+    auto_restart_enabled: bool = True
+    options: list[RuntimeProfileOption]
+
+
+class RuntimeProfileUpdate(BaseModel):
+    runtime_profile: RuntimeProfileValue
+    updated_by: str | None = Field(default="frontend", max_length=64)
+
+
+class AlgorithmFlowEndpoint(BaseModel):
+    ip_src: str | None = None
+    ip_dst: str | None = None
+    ssrc: str | None = None
+    ssrc_hex: str | None = None
+    port_src: str | None = None
+    port_dst: str | None = None
+
+
+class AlgorithmActiveFlowItem(BaseModel):
+    device_id: str
+    camera_name: str | None = None
+    camera_ip: str | None = None
+    server_ip: str | None = None
+    uplink: AlgorithmFlowEndpoint | None = None
+    downlink: list[AlgorithmFlowEndpoint] = Field(default_factory=list)
+    collectable: bool = False
+    missing_fields: list[str] = Field(default_factory=list)
+    connectivity_status: str = "unknown"
+    detection_status: str = "idle"
+    matched_anomaly_count: int = 0
+    matched_anomaly_types: list[str] = Field(default_factory=list)
+
+
+class AlgorithmActiveFlowResponse(BaseModel):
+    updated_at: datetime | None = None
+    source_file: str | None = None
+    chainlist_file: str
+    raw_flow_count: int = 0
+    collectable_flow_count: int = 0
+    chainlist_format: str
+    flows: list[AlgorithmActiveFlowItem]
+
+
+class AlgorithmAnomalyRead(BaseModel):
+    id: str
+    timestamp: datetime | None = None
+    source_label: str
+    anomaly_entity_id: str
+    anomaly_entity_type: str
+    anomaly_type: str | None = None
+    anomaly_score: float | None = None
+    anomaly_column: str | None = None
+    anomaly_column_value: str | float | None = None
+    global_anomaly_score: float | None = None
+    root_cause_entity: str | None = None
+    root_cause_entity_type: str | None = None
+    device_id: str | None = None
+    camera_ip: str | None = None
+    server_ip: str | None = None
+    run_id: str | None = None
+    prediction: Any | None = None
+    reconstruction_error: Any | None = None
+    raw: dict[str, Any] | None = None
 
 
 # =========================

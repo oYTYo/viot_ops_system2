@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle2, Loader2, RotateCw, Search, Settings2, X, Zap, ChevronDown, Filter } from "lucide-react";
 import { getDeviceCameras, getDeviceStreams } from "../services/deviceApi";
 import { getCameraPreview } from "../services/videoApi";
+import { getAlgorithmRuntimeProfile, updateAlgorithmRuntimeProfile } from "../services/algorithmApi";
+import LivePlayer from "../components/LivePlayer";
 
 const ALARM_CONFIRM_STORAGE_KEY = "viotops-alarm-confirm-state-v1";
 
@@ -428,7 +430,6 @@ function buildAlarms(cameras, streams, handledMap, confirmStrategy, algorithm) {
 function AlarmPreview({ alarm }) {
   const [state, setState] = useState("loading");
   const [preview, setPreview] = useState(null);
-  const videoRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -461,22 +462,10 @@ function AlarmPreview({ alarm }) {
     };
   }, [alarm.id, alarm.camera?.id]);
 
-  useEffect(() => {
-    if (state !== "playing" || !preview?.play_url || !videoRef.current) return undefined;
-    const video = videoRef.current;
-    const play = () => {
-      video.currentTime = Number(preview.start_time || 0);
-      video.play().catch(() => {});
-    };
-    video.addEventListener("loadedmetadata", play, { once: true });
-    video.load();
-    return () => video.removeEventListener("loadedmetadata", play);
-  }, [state, preview]);
-
   return (
     <div className="relative aspect-video overflow-hidden rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-black">
       {state === "playing" && preview?.play_url ? (
-        <video ref={videoRef} src={preview.play_url} muted loop playsInline className="h-full w-full object-cover" />
+        <LivePlayer preview={preview} startTime={Number(preview.start_time || 0)} onError={() => setState("failed")} />
       ) : state === "failed" ? (
         <div className="flex h-full flex-col items-center justify-center gap-[var(--layout-search-gap)] text-ui-medium text-white">
           <AlertTriangle size="var(--icon-topbar)" className="text-[var(--color-error-text)]" />
@@ -750,7 +739,13 @@ function PollingConfigPanel({ scopeName, confirmStrategy, setConfirmStrategy, on
   );
 }
 
-function AlgorithmConfigPanel({ algorithm, setAlgorithm, thresholds, setThresholds, onClose }) {
+function AlgorithmConfigPanel({
+  algorithm,
+  setAlgorithm,
+  thresholds,
+  setThresholds,
+  onClose,
+}) {
   const [thresholdOpen, setThresholdOpen] = useState(false);
   const [thresholdDraft, setThresholdDraft] = useState(thresholds);
   const algorithms = [
@@ -874,7 +869,72 @@ function AlgorithmConfigPanel({ algorithm, setAlgorithm, thresholds, setThreshol
   );
 }
 
-export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpenCameraDiagnosis, showAlarmConfig, onCloseAlarmConfig, showPollingConfig, onClosePollingConfig }) {
+function RuntimeModePanel({
+  runtimeProfile,
+  runtimeProfileDraft,
+  setRuntimeProfileDraft,
+  runtimeProfileLoading,
+  runtimeProfileSaving,
+  runtimeProfileError,
+  runtimeProfileMessage,
+  onSaveRuntimeProfile,
+  onClose,
+}) {
+  return (
+    <div className="col-span-2 rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] shadow-[var(--shadow-panel)]">
+      <header className="flex items-center justify-between border-b border-[var(--color-panel-border)] bg-[var(--color-control-bg)] px-[var(--layout-content-padding)] py-[var(--layout-search-padding-y)]">
+        <div className="flex items-center gap-[var(--layout-search-gap)] text-ui-large font-bold text-[var(--color-text-main)]">
+          <Settings2 size="var(--icon-bottom)" className="text-[var(--color-accent)]" />
+          算法运行模式
+        </div>
+        <button type="button" onClick={onClose} className="text-[var(--color-icon-muted)] hover:text-[var(--color-error-text)]"><X size="var(--icon-topbar)" /></button>
+      </header>
+      <div className="p-[var(--layout-content-padding)]">
+        <div className="mb-[var(--layout-content-gap)] flex items-center justify-between gap-[var(--layout-search-gap)]">
+          <div className="min-w-0">
+            <div className="text-ui-medium font-semibold text-[var(--color-text-main)]">当前运行配置</div>
+            <div className="truncate text-ui-small text-[var(--color-text-muted)]">
+              {runtimeProfile?.updated_at ? `上次保存：${new Date(runtimeProfile.updated_at).toLocaleString("zh-CN", { hour12: false })}` : "读取后端 runtime profile"}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={runtimeProfileLoading || runtimeProfileSaving || !runtimeProfileDraft || runtimeProfileDraft === runtimeProfile?.runtime_profile}
+            onClick={onSaveRuntimeProfile}
+            className="h-[var(--layout-search-height)] shrink-0 rounded-[var(--layout-radius-sm)] bg-[var(--color-topbar-active-bg)] px-[var(--layout-search-padding-x)] text-ui-small font-semibold text-[var(--color-topbar-active-text)] enabled:hover:bg-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {runtimeProfileSaving ? "保存中" : "保存模式"}
+          </button>
+        </div>
+        <div className="grid grid-cols-5 gap-[var(--layout-search-gap)]">
+          {(runtimeProfile?.options || []).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              disabled={runtimeProfileLoading || runtimeProfileSaving}
+              onClick={() => setRuntimeProfileDraft(option.value)}
+              title={option.description}
+              className={`min-h-[var(--layout-search-height)] rounded-[var(--layout-radius-sm)] border px-[var(--layout-tree-action-padding)] text-ui-small font-medium transition ${
+                runtimeProfileDraft === option.value
+                  ? "border-[var(--color-accent)] bg-[var(--color-topbar-active-bg)] text-[var(--color-topbar-active-text)]"
+                  : "border-[var(--color-panel-border)] bg-[var(--color-control-bg)] text-[var(--color-text-muted)] hover:bg-[var(--color-hover-bg)] hover:text-[var(--color-text-main)]"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {(runtimeProfileError || runtimeProfileMessage || runtimeProfileLoading) && (
+          <div className={`mt-[var(--layout-tree-gap)] text-ui-small ${runtimeProfileError ? "text-[var(--color-error-text)]" : "text-[var(--color-text-muted)]"}`}>
+            {runtimeProfileError || runtimeProfileMessage || "正在读取运行模式"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpenCameraDiagnosis, showAlarmConfig, onCloseAlarmConfig, showPollingConfig, onClosePollingConfig, showRuntimeModeConfig, onCloseRuntimeModeConfig }) {
   const [cameras, setCameras] = useState([]);
   const [streams, setStreams] = useState([]);
   const [keyword, setKeyword] = useState("");
@@ -899,6 +959,12 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     时延抖动: 25,
     丢包率: 1.5,
   });
+  const [runtimeProfile, setRuntimeProfile] = useState(null);
+  const [runtimeProfileDraft, setRuntimeProfileDraft] = useState("");
+  const [runtimeProfileLoading, setRuntimeProfileLoading] = useState(false);
+  const [runtimeProfileSaving, setRuntimeProfileSaving] = useState(false);
+  const [runtimeProfileError, setRuntimeProfileError] = useState("");
+  const [runtimeProfileMessage, setRuntimeProfileMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailModalAlarm, setDetailModalAlarm] = useState(null);
   const alarmResetSeenRef = useRef(resetVersion);
@@ -939,6 +1005,27 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
     setConfirmStrategy("manual");
     setStatusFilter("all");
   }, [resetVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRuntimeProfileLoading(true);
+    setRuntimeProfileError("");
+    getAlgorithmRuntimeProfile()
+      .then((data) => {
+        if (cancelled) return;
+        setRuntimeProfile(data);
+        setRuntimeProfileDraft(data.runtime_profile || "");
+      })
+      .catch((error) => {
+        if (!cancelled) setRuntimeProfileError(error?.response?.data?.detail || error?.message || "运行模式读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (algorithmLoadSeenRef.current === algorithm) return;
@@ -1044,6 +1131,26 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
       ...current,
       [alarm.id]: newPriority,
     }));
+  }
+
+  function saveRuntimeProfile() {
+    if (!runtimeProfileDraft) return;
+    setRuntimeProfileSaving(true);
+    setRuntimeProfileError("");
+    setRuntimeProfileMessage("");
+    updateAlgorithmRuntimeProfile({
+      runtime_profile: runtimeProfileDraft,
+      updated_by: "frontend",
+    })
+      .then((data) => {
+        setRuntimeProfile(data);
+        setRuntimeProfileDraft(data.runtime_profile || runtimeProfileDraft);
+        setRuntimeProfileMessage("运行模式已保存，算法下次读取配置时生效");
+      })
+      .catch((error) => {
+        setRuntimeProfileError(error?.response?.data?.detail || error?.message || "运行模式保存失败");
+      })
+      .finally(() => setRuntimeProfileSaving(false));
   }
 
   useEffect(() => {
@@ -1292,6 +1399,20 @@ export default function VideoAlarmManage({ focusTarget, resetVersion = 0, onOpen
               thresholds={thresholds}
               setThresholds={setThresholds}
               onClose={onCloseAlarmConfig}
+            />
+          )}
+
+          {showRuntimeModeConfig && (
+            <RuntimeModePanel
+              runtimeProfile={runtimeProfile}
+              runtimeProfileDraft={runtimeProfileDraft}
+              setRuntimeProfileDraft={setRuntimeProfileDraft}
+              runtimeProfileLoading={runtimeProfileLoading}
+              runtimeProfileSaving={runtimeProfileSaving}
+              runtimeProfileError={runtimeProfileError}
+              runtimeProfileMessage={runtimeProfileMessage}
+              onSaveRuntimeProfile={saveRuntimeProfile}
+              onClose={onCloseRuntimeModeConfig}
             />
           )}
         </section>
