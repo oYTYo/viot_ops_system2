@@ -137,6 +137,112 @@
   --layout-device-table-padding-y: calc(var(--font-medium) * 0.12);
 }
 
+.font-scale-small .operation-metrics-panel {
+  container-type: size;
+  justify-content: flex-start;
+  gap: clamp(0.65rem, 1.6cqh, 1.25rem);
+  padding: clamp(0.7rem, 1.35cqh, 1.05rem);
+}
+
+.font-scale-small .operation-metrics-section {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.font-scale-small .operation-metrics-resource {
+  flex: 1.25 1 0;
+}
+
+.font-scale-small .operation-metrics-health {
+  flex: 1.15 1 0;
+}
+
+.font-scale-small .operation-metrics-alarm {
+  flex: 1.08 1 0;
+}
+
+.font-scale-small .operation-metrics-title {
+  margin-bottom: clamp(0.05rem, 0.35cqh, 0.32rem);
+  font-size: clamp(1.35rem, 2.1cqh, calc(var(--font-large) * 0.9));
+  line-height: 1.08;
+}
+
+.font-scale-small .operation-metrics-card {
+  container-type: size;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(0.38rem, 1cqh, 0.85rem) clamp(0.6rem, 2cqw, 1.05rem);
+}
+
+.font-scale-small .operation-resource-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: space-between;
+  gap: clamp(0.25rem, 1.3cqh, 0.8rem);
+}
+
+.font-scale-small .operation-metrics-resource .operation-metrics-card {
+  justify-content: stretch;
+  padding-top: clamp(0.25rem, 0.65cqh, 0.55rem);
+  padding-bottom: clamp(0.25rem, 0.65cqh, 0.55rem);
+}
+
+.font-scale-small .operation-resource-stack > div > div:nth-child(2) {
+  margin-top: clamp(0.2rem, 1.15cqh, 0.65rem);
+  gap: clamp(0.2rem, 1cqh, 0.55rem);
+}
+
+.font-scale-small .operation-resource-stack > div > div:nth-child(3) {
+  margin-top: clamp(0.15rem, 0.75cqh, 0.42rem);
+}
+
+.font-scale-small .operation-health {
+  min-height: 100%;
+  justify-content: flex-start;
+  gap: clamp(0.3rem, 1.5cqh, 0.95rem);
+  padding-top: 0;
+}
+
+.font-scale-small .operation-health-row {
+  flex: 1 1 auto;
+  align-self: stretch;
+  gap: clamp(2.5rem, 12cqw, 4.5rem);
+}
+
+.font-scale-small .operation-health-gauge {
+  width: clamp(7.4rem, min(42cqw, 62cqh), 11.5rem);
+  height: clamp(7.4rem, min(42cqw, 62cqh), 11.5rem);
+}
+
+.font-scale-small .operation-health-gauge .font-bold {
+  font-size: clamp(2.05rem, 11cqh, 3.15rem);
+}
+
+.font-scale-small .operation-health-legend {
+  gap: clamp(3.0rem, 7cqh, 2.5rem);
+}
+
+.font-scale-small .operation-health-safe {
+  flex: 0 0 auto;
+  font-size: clamp(1.25rem, 3.1cqh, calc(var(--font-medium) * 0.95));
+}
+
+.font-scale-small .operation-chart {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.font-scale-small .operation-chart-svg {
+  height: clamp(8.5rem, 92cqh, 17rem);
+  max-height: 100%;
+}
+
 .text-app-title {
   font-size: var(--font-title);
   line-height: 1.1;

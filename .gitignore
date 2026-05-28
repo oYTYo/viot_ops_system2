@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 .Python
 
+backend/viot_ops_dev.db

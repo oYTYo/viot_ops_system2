@@ -25,12 +25,14 @@ import {
   RotateCw,
   Check,
   MoreHorizontal,
+  Zap,
 } from "lucide-react";
 import MapView from "../../pages/MapView";
 import DeviceManage from "../../pages/DeviceManage";
 import VideoAlarmManage from "../../pages/VideoAlarmManage";
 import StatisticsView from "../../pages/StatisticsView";
 import WorkOrderManage from "../../pages/WorkOrderManage";
+import FlowControlView from "../../pages/FlowControlView";
 
 
 import {
@@ -512,7 +514,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const dropdownTabs = ["device_manage", "work_order"];
+  const dropdownTabs = ["device_manage", "work_order", "flow_control"];
   const isDropdownActive = dropdownTabs.includes(activeTab);
 
   const handleDropdownSelect = (key) => {
@@ -568,6 +570,7 @@ function TopBar({ activeTab, onTabChange, onFontSizeToggle, onThemeToggle, darkM
                 {[
                   { key: "device_manage", label: "设备管理" },
                   { key: "work_order", label: "工单管理" },
+                  { key: "flow_control", label: "流控模块" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -2120,6 +2123,8 @@ function ContentPlaceholder({
   alarmFocusTarget,
   alarmResetVersion,
   statsFocusTarget,
+  flowFocusTarget,
+  flowNetworkLossEnabled,
   darkMode,
   onOpenCameraDetail,
   onOpenCameraDiagnosis,
@@ -2144,6 +2149,10 @@ function ContentPlaceholder({
 
   if (activeTab === "stats") {
     return <StatisticsView focusTarget={statsFocusTarget} onNavigateToDevice={onNavigateToDevice} />;
+  }
+
+  if (activeTab === "flow_control") {
+    return <FlowControlView focusTarget={flowFocusTarget} networkLossEnabled={flowNetworkLossEnabled} />;
   }
 
   if (activeTab === "device_manage") {
@@ -2183,6 +2192,8 @@ function BottomBar({
   onResetDiagnoses,
   onOpenAlarmConfig,
   onOpenPollingConfig,
+  onAddNetworkLoss,
+  networkLossEnabled,
 }) {
   return (
     <footer className="flex h-[var(--layout-footer-height)] shrink-0 border-t border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] text-ui-small text-[var(--color-text-muted)] transition-colors">
@@ -2219,7 +2230,7 @@ function BottomBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-[var(--layout-search-gap)]">
-          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses, onOpenAlarmConfig, onOpenPollingConfig })}
+          {getPageBottomActions(activeTab, { onResetAlarms, onResetDiagnoses, onOpenAlarmConfig, onOpenPollingConfig, onAddNetworkLoss, networkLossEnabled })}
         </div>
       </div>
     </footer>
@@ -2232,6 +2243,7 @@ function getPageBottomHint(activeTab) {
     alarm: "异常告警工具栏",
     device: "根因诊断工具栏",
     stats: "统计分析工具栏",
+    flow_control: "流控模块工具栏",
     device_manage: "设备管理工具栏",
     work_order: "工单管理工具栏",
   };
@@ -2276,6 +2288,15 @@ function getPageBottomActions(activeTab, options = {}) {
     return <span>后续可扩展时间范围、报表导出等工具</span>;
   }
 
+  if (activeTab === "flow_control") {
+    return (
+      <button type="button" onClick={options.onAddNetworkLoss} className="flex min-h-[var(--layout-segment-button-height)] items-center gap-[var(--layout-reset-tooltip-gap)] rounded-[var(--layout-radius-sm)] border border-[var(--color-error-text)] px-[var(--layout-segment-button-padding-x)] text-ui-small font-medium text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)]">
+        <Zap size="var(--icon-bottom)" />
+        {options.networkLossEnabled ? "关闭网损" : "添加网损"}
+      </button>
+    );
+  }
+
   return null;
 }
 
@@ -2295,6 +2316,8 @@ export default function VioTMasterLayout() {
   const [alarmFocusTarget, setAlarmFocusTarget] = useState(null);
   const [alarmResetVersion, setAlarmResetVersion] = useState(0);
   const [statsFocusTarget, setStatsFocusTarget] = useState(null);
+  const [flowFocusTarget, setFlowFocusTarget] = useState(null);
+  const [flowNetworkLossEnabled, setFlowNetworkLossEnabled] = useState(false);
   const [showAlarmConfig, setShowAlarmConfig] = useState(false);
   const [showPollingConfig, setShowPollingConfig] = useState(false);
   const externalDetailReturnTabRef = useRef("");
@@ -2363,6 +2386,10 @@ export default function VioTMasterLayout() {
       setStatsFocusTarget({ ...cameraNode, version: Date.now() });
       return;
     }
+    if (activeTab === "flow_control") {
+      setFlowFocusTarget({ ...cameraNode, version: Date.now() });
+      return;
+    }
   };
 
   const handleTabChange = (key) => {
@@ -2427,6 +2454,14 @@ export default function VioTMasterLayout() {
         ...node,
         version: Date.now(),
       });
+      return;
+    }
+
+    if (activeTab === "flow_control") {
+      setFlowFocusTarget({
+        ...node,
+        version: Date.now(),
+      });
     }
   };
 
@@ -2466,6 +2501,8 @@ export default function VioTMasterLayout() {
           alarmFocusTarget={alarmFocusTarget}
           alarmResetVersion={alarmResetVersion}
           statsFocusTarget={statsFocusTarget}
+          flowFocusTarget={flowFocusTarget}
+          flowNetworkLossEnabled={flowNetworkLossEnabled}
           darkMode={darkMode}
           showAlarmConfig={showAlarmConfig}
           onCloseAlarmConfig={() => setShowAlarmConfig(false)}
@@ -2485,6 +2522,8 @@ export default function VioTMasterLayout() {
         }}
         onOpenAlarmConfig={() => setShowAlarmConfig(true)}
         onOpenPollingConfig={() => setShowPollingConfig(true)}
+        onAddNetworkLoss={() => setFlowNetworkLossEnabled((value) => !value)}
+        networkLossEnabled={flowNetworkLossEnabled}
       />
     </div>
   );

@@ -249,11 +249,11 @@ function StatusMetricBar({ title, icon: Icon, data, offlineLabel = "离线", onT
   );
 }
 
-function DashboardSection({ title, children }) {
+function DashboardSection({ title, children, className = "" }) {
   return (
-    <section className="min-w-0">
-      <h2 className="mb-[var(--layout-search-padding-y)] text-ui-large font-bold text-[var(--color-text-main)]">{title}</h2>
-      <div className="rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-padding)]">
+    <section className={`operation-metrics-section ${className} min-w-0`}>
+      <h2 className="operation-metrics-title mb-[var(--layout-search-padding-y)] text-ui-large font-bold text-[var(--color-text-main)]">{title}</h2>
+      <div className="operation-metrics-card rounded-[var(--layout-radius-md)] border border-[var(--color-panel-border)] bg-[var(--color-control-bg)] p-[var(--layout-content-padding)]">
         {children}
       </div>
     </section>
@@ -281,11 +281,11 @@ function HealthGaugeMini({ value, safeDays = 42 }) {
   const color = numeric >= 90 ? "var(--color-accent)" : numeric >= 70 ? "#f59e0b" : "var(--color-error-text)";
 
   return (
-    <div className="flex min-w-0 flex-col items-center justify-center gap-[calc(var(--layout-content-gap)*2)] pt-[var(--layout-search-padding-y)]">
+    <div className="operation-health flex min-w-0 flex-col items-center justify-center gap-[calc(var(--layout-content-gap)*2)] pt-[var(--layout-search-padding-y)]">
       {/* 上半部分：仪表盘与图例 */}
-      <div className="flex min-w-0 items-center justify-center gap-[calc(var(--layout-content-padding)*2)]">
+      <div className="operation-health-row flex min-w-0 items-center justify-center gap-[calc(var(--layout-content-padding)*2)]">
         {/* 仪表盘及悬浮公式 */}
-        <div className="group relative h-[calc(var(--font-large)*4.45)] w-[calc(var(--font-large)*4.45)] shrink-0 overflow-visible">
+        <div className="operation-health-gauge group relative h-[calc(var(--font-large)*4.45)] w-[calc(var(--font-large)*4.45)] shrink-0 overflow-visible">
           <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90 scale-125 overflow-visible">
             <circle cx="60" cy="60" r={radius} fill="none" stroke="var(--color-control-bg)" strokeWidth="12" />
             <circle cx="60" cy="60" r={radius} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${dash} ${circumference - dash}`} />
@@ -300,7 +300,7 @@ function HealthGaugeMini({ value, safeDays = 42 }) {
         </div>
 
         {/* 右侧：色彩分级图例 */}
-        <div className="flex flex-col gap-[var(--layout-search-gap)]">
+        <div className="operation-health-legend flex flex-col gap-[var(--layout-search-gap)]">
           <div className="flex items-center gap-[var(--layout-reset-tooltip-gap)]">
             <span className="h-[calc(var(--font-small)*0.8)] w-[calc(var(--font-small)*0.8)] rounded-sm bg-[var(--color-accent)]" />
             <span className="text-ui-medium text-[var(--color-text-main)]">健康（健康度90-100）</span>
@@ -317,7 +317,7 @@ function HealthGaugeMini({ value, safeDays = 42 }) {
       </div>
 
       {/* 下半部分：运行天数文案 */}
-      <div className="text-center text-ui-medium text-[var(--color-text-muted)]">
+      <div className="operation-health-safe text-center text-ui-medium text-[var(--color-text-muted)]">
         已保障系统无重大危险持续 <span className="mx-[var(--layout-reset-tooltip-gap)] font-bold text-[var(--color-accent)]">{safeDays}</span> 天
       </div>
     </div>
@@ -360,14 +360,14 @@ function MiniLineChart({ data = [], maxCount }) {
   const area = `${padLeft},${height - padBottom} ${points} ${width - padRight},${height - padBottom}`;
 
   return (
-    <div className="min-w-0 overflow-hidden text-ui-small">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[calc(var(--font-large)*7)] w-full text-ui-small">
+    <div className="operation-chart min-w-0 overflow-hidden text-ui-small">
+      <svg viewBox={`0 0 ${width} ${height}`} className="operation-chart-svg h-[calc(var(--font-large)*7)] w-full text-ui-small">
         <line x1={padLeft} x2={width - padRight} y1={height - padBottom} y2={height - padBottom} stroke="var(--color-panel-border)" />
         <polyline points={area} fill="var(--color-error-text)" opacity="0.16" />
         <polyline points={points} fill="none" stroke="var(--color-error-text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
         {normalizedData.map((row, index) => (
           <g key={row.date}>
-            <text x={xFor(index)} y={yFor(row.count || 0) - 7} textAnchor="middle" fill="var(--color-error-text)" fontSize="var(--font-small)" fontWeight="700">{row.count || 0}</text>
+            <text x={xFor(index)} y={yFor(row.count || 0) - 12} textAnchor="middle" fill="var(--color-error-text)" fontSize="var(--font-small)" fontWeight="600">{row.count || 0}</text>
             <circle cx={xFor(index)} cy={yFor(row.count || 0)} r="3.5" fill="var(--color-error-text)" />
             <text x={xFor(index)} y={height - 4} textAnchor="middle" fill="var(--color-text-muted)" fontSize="0.95rem">{formatWeekdayLabel(row.date)}</text>
           </g>
@@ -415,10 +415,10 @@ function OperationMetricsPanel({ focusTarget, onNavigateToDevice }) {
   const cameraTotal = Number(data?.device_status?.cameras?.total || 0);
 
   return (
-    <aside className="relative flex min-h-0 flex-col justify-between gap-[var(--layout-content-gap)] overflow-auto rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
+    <aside className="operation-metrics-panel relative flex min-h-0 flex-col justify-between gap-[var(--layout-content-gap)] overflow-auto rounded-[var(--layout-radius-lg)] border border-[var(--color-panel-border)] bg-[var(--color-panel-bg)] p-[var(--layout-content-padding)] shadow-[var(--shadow-panel)]">
       {loading && <Loader2 size="var(--icon-bottom)" className="absolute right-[var(--layout-content-padding)] top-[var(--layout-content-padding)] animate-spin text-[var(--color-accent)]" />}
-      <DashboardSection title="资源状态统计">
-        <div className="flex min-h-[calc(var(--font-large)*13)] flex-col justify-between gap-[var(--layout-content-gap)]">
+      <DashboardSection title="资源状态统计" className="operation-metrics-resource">
+        <div className="operation-resource-stack flex min-h-[calc(var(--font-large)*13)] flex-col justify-between gap-[var(--layout-content-gap)]">
           <StatusMetricBar 
             title="摄像机" 
             icon={Camera} 
@@ -443,10 +443,10 @@ function OperationMetricsPanel({ focusTarget, onNavigateToDevice }) {
           />
         </div>
       </DashboardSection>
-      <DashboardSection title="流链路全局健康度">
+      <DashboardSection title="流链路全局健康度" className="operation-metrics-health">
         <HealthGaugeMini value={health} safeDays={data?.golden_metrics?.safe_days || 42} />
       </DashboardSection>
-      <DashboardSection title="异常告警统计">
+      <DashboardSection title="异常告警统计" className="operation-metrics-alarm">
         <MiniLineChart data={data?.anomaly_trend || []} maxCount={cameraTotal} />
       </DashboardSection>
     </aside>
